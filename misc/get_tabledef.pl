@@ -1,4 +1,6 @@
-use v5.14;
+use strict;
+use warnings;
+
 
 use DBI;
 use Data::Dumper;
@@ -9,11 +11,23 @@ use DateTime;
 my $dsn = 'dbi:mysql:dbname=test';
 my $user = 'root';
 
-my @varchar_list = ( 0..9, 'a'..'z', 'A'..'Z', '_' );
-my $count_varchar_list = scalar @varchar_list;
+my @VARCHAR_LIST = ( 0..9, 'a'..'z', 'A'..'Z', '_' );
+my $COUNT_VARCHAR_LIST = scalar @VARCHAR_LIST;
 
-my $MAXINT_SIGNED = 2147483647;
-my $MAXINT_UNSIGNED = 4294967295;
+my $MAX_TINYINT_SIGNED       = 127;
+my $MAX_TINYINT_UNSIGNED     = 255;
+my $MAX_SMALLINT_SIGNED      = 32767;
+my $MAX_SMALLINT_UNSIGNED    = 65535;
+my $MAX_INT_SIGNED           = 2147483647;
+my $MAX_INT_UNSIGNED         = 4294967295;
+
+my %VALUE_DEF_FUNC = (
+    varchar     => \&val_varchar,
+    tinyint     => \&val_tinyint,
+    smallint    => \&val_smallint,
+    int         => \&val_int,
+    datetime    => \&val_datetime,
+);
 
 
 main();
@@ -28,38 +42,22 @@ sub main {
     my $def = get_table_definition($dbh);
     print Dumper($def);
 
-
-    my @colnames = grep { $res->{$_}{Extra} !~ /auto_increment/ } keys %$res;
+    my @colnames = grep { $def->{$_}{Extra} !~ /auto_increment/ } keys %$def;
     my $cols = join ',', @colnames;
     my $ph   = join ',', ('?') x scalar(@colnames);
-    $sql = "INSERT INTO test ($cols) VALUES ($ph)";
+    my $sql = "INSERT INTO test ($cols) VALUES ($ph)";
 
     my $sth = $dbh->prepare($sql);
 
     for ( 1..100 ) {
         my @values = ();
         for my $key (@colnames) {
-            my $value;
-
-            my $def = $res->{$key};
-
-            my $type = $def->{Type};
-            if ($type =~ /^varchar\((\d+)\)$/) {
-                my $string = '';
-                for (1 .. $1) {
-                    $string .= $varchar_list[ int( rand() * $count_varchar_list ) ];
-                }
-                $value = $string;
-
-            }
-            elsif ( $type =~ /^int\(/ ) {
-                $value = int(rand() * $MAXINT_SIGNED);
-
-            }
-            elsif ( $type eq 'datetime' ) {
-                $value = DateTime->from_epoch( epoch => rand() * $MAXINT_UNSIGNED )->datetime();
-
-            }
+            #print $def->{$key}{Type} . "\n";
+            my ($type, $size, $opt) = ($def->{$key}{Type} =~ /^(\w+)(?:\((\d+)\))?(\s\w+)?$/);
+            my $func = $VALUE_DEF_FUNC{$type}
+                or die "Type $type not supported";
+            
+            my $value = $func->($size, $opt);
 
             push @values, $value;
         }
@@ -84,52 +82,39 @@ sub get_table_definition {
 }
 
 
+sub val_varchar {
+    my ($size) = @_;
 
-__END__
-$VAR1 = { 
-          'create_time' => { 
-                             'Extra' => '',
-                             'Default' => undef,
-                             'Comment' => '',
-                             'Field' => 'create_time',
-                             'Type' => 'datetime',
-                             'Privileges' => 'select,insert,update,references',
-                             'Null' => 'YES',
-                             'Key' => '',
-                             'Collation' => undef
-                           },
-          'name' => { 
-                      'Extra' => '',
-                      'Default' => undef,
-                      'Comment' => '',
-                      'Field' => 'name',
-                      'Type' => 'varchar(100)',
-                      'Privileges' => 'select,insert,update,references',
-                      'Null' => 'YES',
-                      'Key' => '',
-                      'Collation' => 'latin1_swedish_ci'
-                    },
-          'price' => { 
-                       'Extra' => '',
-                       'Default' => undef,
-                       'Comment' => '',
-                       'Field' => 'price',
-                       'Type' => 'int(11)',
-                       'Privileges' => 'select,insert,update,references',
-                       'Null' => 'YES',
-                       'Key' => '',
-                       'Collation' => undef
-                     },
-          'id' => { 
-                    'Extra' => 'auto_increment',
-                    'Default' => undef,
-                    'Comment' => '',
-                    'Field' => 'id',
-                    'Type' => 'int(11)',
-                    'Privileges' => 'select,insert,update,references',
-                    'Null' => 'NO',
-                    'Key' => 'PRI',
-                    'Collation' => undef
-                  }
-        };
+    my $string = '';
+    for (1 .. $size) {
+        $string .= $VARCHAR_LIST[ int( rand() * $COUNT_VARCHAR_LIST ) ];
+    }
+
+    return $string;
+}
+
+
+sub val_tinyint {
+    my ($size, $opt) = @_;
+
+    return (($opt || '') eq 'unsigned') ? int(rand() * $MAX_TINYINT_UNSIGNED) : int(rand() * $MAX_TINYINT_SIGNED);
+}
+
+sub val_smallint {
+    my ($size, $opt) = @_;
+
+    return (($opt || '') eq 'unsigned') ? int(rand() * $MAX_SMALLINT_UNSIGNED) : int(rand() * $MAX_SMALLINT_SIGNED);
+}
+
+sub val_int {
+    my ($size, $opt) = @_;
+
+    return (($opt || '') eq 'unsigned') ? int(rand() * $MAX_INT_UNSIGNED) : int(rand() * $MAX_INT_SIGNED);
+}
+
+
+sub val_datetime {
+    return DateTime->from_epoch( epoch => rand() * $MAX_INT_UNSIGNED )->datetime();
+}
+
 
