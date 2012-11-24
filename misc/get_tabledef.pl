@@ -19,6 +19,7 @@ my $TABLE_NAME = 'test';
 my $REF_TABLE_NAME = 'ref_test';
 
 my %cond = ();
+my %cond_ref = ();
 
 my @VARCHAR_LIST = ( 0..9, 'a'..'z', 'A'..'Z', '_' );
 my $COUNT_VARCHAR_LIST = scalar @VARCHAR_LIST;
@@ -85,18 +86,33 @@ SQL
 #        INSERT INTO $REF_TABLE_NAME (name) values ('testname1'), ('testname2')
 #SQL
 
-    process_table($dbh, $REF_TABLE_NAME, { id => $_ * 10 } ) for 1..3;
-    process_table($dbh, $TABLE_NAME, { rate2 => 0.05 }) for 1..100;
+    insert_one($dbh, $REF_TABLE_NAME, { id => $_ * 10 } ) for 1..3;
+    for (1..100) { 
+        my $last_id = insert_one($dbh, $TABLE_NAME, { rate2 => 0.05 });
+        print "ID: $last_id\n";
+    };
 
     $dbh->disconnect;
 
 }
 
 
+sub insert_one {
+    my ($dbh, $table, $table_cond) = @_;
+
+    #  再帰処理を行う前に、前回の条件をクリアする必要がある(外部参照以外)
+    %cond = ();
+
+    #  新しい条件を読み込む
+    parse_table_cond($table, $table_cond);
+
+    return process_table($dbh, $table, $table_cond);
+}
+
+
 sub process_table {
     my ($dbh, $table, $table_cond) = @_;
 
-    parse_table_cond($table, $table_cond);
 
     my $def = get_table_definition($dbh, $table);
     my $constraint = get_constraint($dbh, $table);
@@ -127,16 +143,16 @@ sub process_table {
                 and my $ref_col   = $const_key->{REFERENCED_COLUMN_NAME} ) 
             {
 
-                if ( !defined( $cond{$table}{$key} ) ) {
+                if ( !defined( $cond_ref{$table}{$key} ) ) {
                     my $ref_res = get_current_ref_keys($dbh, $ref_table, $ref_col); 
                     if ( @$ref_res ) {
-                        $cond{$table}{$key}{random} = $ref_res;
+                        $cond_ref{$table}{$key}{random} = $ref_res;
                     }
                     else {
                         my $ref_keys = process_table($dbh, $ref_table);
                         $ref_res = get_current_ref_keys($dbh, $ref_table, $ref_col);
                         if ( @$ref_res ) {
-                            $cond{$table}{$key}{random} = $ref_res;
+                            $cond_ref{$table}{$key}{random} = $ref_res;
                         }
                         else {
                             die "Something is wrong\n";
@@ -147,18 +163,11 @@ sub process_table {
             }
 
             my $value;
-            if ( my $cond_key = $cond{$table}{$key} ) {
-                print Dumper($cond_key);
 
-                if ( $cond_key->{random} ) {
-                    my $ind = rand() * @{ $cond_key->{random} };
-                    $value = $cond_key->{random}[$ind]; 
-                }
-                elsif ( $cond_key->{fixval} ) {
-                    $value = $cond_key->{fixval};
-                }
-
-            } 
+            for ( \%cond, \%cond_ref ) {
+                $value = determine_value( $_->{$table}{$key} );
+                defined($value) and last;
+            }
 
             if ( !defined($value) ) {
                 my $func = $VALUE_DEF_FUNC{$type}
@@ -174,8 +183,26 @@ sub process_table {
     }
 
     $sth->finish;
+
+    return $dbh->{'mysql_insertid'};
 }
 
+
+sub determine_value {
+    my ($cond_key) = @_;
+
+    my $value;
+
+    if ( $cond_key->{random} ) {
+        my $ind = rand() * @{ $cond_key->{random} };
+        $value = $cond_key->{random}[$ind]; 
+    }
+    elsif ( $cond_key->{fixval} ) {
+        $value = $cond_key->{fixval};
+    }
+
+    return $value;
+}
 
 
 #  INSERT 実行時に値を指定する必要のある列のみ抽出する
@@ -258,6 +285,8 @@ sub val_datetime {
 sub get_current_ref_keys {
     my ($dbh, $table, $col) = @_;
 
+    print "get_current_ref_keys\n";
+
     #  現存するレコードを確認
     my $ref_sql = "SELECT DISTINCT $col FROM $table LIMIT 100";
     my $ref_res = $dbh->selectall_arrayref($ref_sql);
@@ -288,5 +317,4 @@ sub parse_table_cond {
         }
     }
 
-    print Dumper($cond{$table});
 }   
