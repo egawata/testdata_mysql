@@ -85,8 +85,8 @@ SQL
 #        INSERT INTO $REF_TABLE_NAME (name) values ('testname1'), ('testname2')
 #SQL
 
-    process_table($dbh, $REF_TABLE_NAME) for 1..3;
-    process_table($dbh, $TABLE_NAME) for 1..100;
+    process_table($dbh, $REF_TABLE_NAME, { id => $_ * 10 } ) for 1..3;
+    process_table($dbh, $TABLE_NAME, { rate2 => 0.05 }) for 1..100;
 
     $dbh->disconnect;
 
@@ -94,15 +94,16 @@ SQL
 
 
 sub process_table {
-    my ($dbh, $table) = @_;
+    my ($dbh, $table, $table_cond) = @_;
+
+    parse_table_cond($table, $table_cond);
 
     my $def = get_table_definition($dbh, $table);
     my $constraint = get_constraint($dbh, $table);
 
-    print Dumper($def);
 
     #  値を指定する必要のある列のみ抽出する
-    my @colnames = get_cols_requires_value($def);
+    my @colnames = get_cols_requires_value($table, $def);
 
     my $cols = join ',', @colnames;
     my $ph   = join ',', ('?') x scalar(@colnames);
@@ -147,10 +148,14 @@ sub process_table {
 
             my $value;
             if ( my $cond_key = $cond{$table}{$key} ) {
+                print Dumper($cond_key);
 
                 if ( $cond_key->{random} ) {
                     my $ind = rand() * @{ $cond_key->{random} };
                     $value = $cond_key->{random}[$ind]; 
+                }
+                elsif ( $cond_key->{fixval} ) {
+                    $value = $cond_key->{fixval};
                 }
 
             } 
@@ -175,11 +180,14 @@ sub process_table {
 
 #  INSERT 実行時に値を指定する必要のある列のみ抽出する
 sub get_cols_requires_value {
-    my ($def) = @_;
+    my ($table, $def) = @_;
 
     return grep { 
-        $def->{$_}{EXTRA} !~ /auto_increment/           #  auto_increment 列
-        and not defined($def->{$_}{COLUMN_DEFAULT})     #  default 値が指定済み
+        defined( $cond{$table}{$_} )
+        or (
+            $def->{$_}{EXTRA} !~ /auto_increment/           #  auto_increment 列
+            and not defined($def->{$_}{COLUMN_DEFAULT})     #  default 値が指定済み
+        )
     } keys %$def;
 }
 
@@ -256,3 +264,29 @@ sub get_current_ref_keys {
 
     return [ map { $_->[0] } @$ref_res ];
 }
+
+
+sub parse_table_cond {
+    my ($table, $table_cond) = @_;
+
+    return unless $table_cond and ref $table_cond eq 'HASH';
+
+    for my $col (keys %$table_cond) {
+
+        my $val = $table_cond->{$col};
+
+        if ( ref $val eq 'ARRAY' ) {
+            $cond{$table}{$col}{random} = $val;
+        }
+        elsif ( ref $val eq 'HASH' ) {
+            for (keys %$val) {
+                $cond{$table}{$col}{$_} = $val->{$_};
+            }
+        }
+        elsif ( ref $val eq '' ) {
+            $cond{$table}{$col}{fixval} = $val;
+        }
+    }
+
+    print Dumper($cond{$table});
+}   
