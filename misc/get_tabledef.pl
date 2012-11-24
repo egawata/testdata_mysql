@@ -36,6 +36,9 @@ my %VALUE_DEF_FUNC = (
     tinyint     => \&val_tinyint,
     smallint    => \&val_smallint,
     int         => \&val_int,
+    bigint      => \&val_int,
+    float       => \&val_float,
+    double      => \&val_float,
     datetime    => \&val_datetime,
     timestamp   => \&val_datetime,
     date        => \&val_datetime,
@@ -69,6 +72,8 @@ SQL
             price int unsigned not null,
             amount int unsigned not null default 10,
             madein char(2),
+            rate double(30,5),
+            rate2 float(30,4),
             ref_table_id integer not null,
             created datetime,
             start_date date,
@@ -80,7 +85,7 @@ SQL
 #        INSERT INTO $REF_TABLE_NAME (name) values ('testname1'), ('testname2')
 #SQL
 
-
+    process_table($dbh, $REF_TABLE_NAME) for 1..3;
     process_table($dbh, $TABLE_NAME) for 1..100;
 
     $dbh->disconnect;
@@ -92,15 +97,13 @@ sub process_table {
     my ($dbh, $table) = @_;
 
     my $def = get_table_definition($dbh, $table);
+    my $constraint = get_constraint($dbh, $table);
+
     print Dumper($def);
 
-    my $constraint = get_constraint($dbh, $table);
-    print Dumper($constraint);
+    #  値を指定する必要のある列のみ抽出する
+    my @colnames = get_cols_requires_value($def);
 
-    my @colnames = grep { 
-        $def->{$_}{EXTRA} !~ /auto_increment/
-        and not defined($def->{$_}{COLUMN_DEFAULT}) 
-    } keys %$def;
     my $cols = join ',', @colnames;
     my $ph   = join ',', ('?') x scalar(@colnames);
     my $sql = "INSERT INTO $table ($cols) VALUES ($ph)";
@@ -110,33 +113,36 @@ sub process_table {
     {
         my @values = ();
         for my $key (@colnames) {
-            #print $def->{$key}{Type} . "\n";
+
             my $type = $def->{$key}{DATA_TYPE};
             my $size = $def->{$key}{CHARACTER_MAXIMUM_LENGTH};
             my $opt  = $def->{$key}{COLUMN_TYPE};
 
             #  外部キー制約の有無を確認
             my $const_key = $constraint->{$key};
-            if ( $const_key->{REFERENCED_TABLE_SCHEMA} 
+            if ( defined $const_key 
+                and $const_key->{REFERENCED_TABLE_SCHEMA} 
                 and my $ref_table = $const_key->{REFERENCED_TABLE_NAME} 
                 and my $ref_col   = $const_key->{REFERENCED_COLUMN_NAME} ) 
             {
+
                 if ( !defined( $cond{$table}{$key} ) ) {
                     my $ref_res = get_current_ref_keys($dbh, $ref_table, $ref_col); 
                     if ( @$ref_res ) {
-                        $cond{$table}{$key}{random} = [ map { $_->[0] } @$ref_res ];
+                        $cond{$table}{$key}{random} = $ref_res;
                     }
                     else {
                         my $ref_keys = process_table($dbh, $ref_table);
                         $ref_res = get_current_ref_keys($dbh, $ref_table, $ref_col);
                         if ( @$ref_res ) {
-                            $cond{$table}{$key}{random} = [ map { $_->[0] } @$ref_res ];
+                            $cond{$table}{$key}{random} = $ref_res;
                         }
                         else {
-                            die "Something wrong\n";
+                            die "Something is wrong\n";
                         }
                     } 
                 }
+
             }
 
             my $value;
@@ -148,7 +154,8 @@ sub process_table {
                 }
 
             } 
-            else {
+
+            if ( !defined($value) ) {
                 my $func = $VALUE_DEF_FUNC{$type}
                     or die "Type $type for $key not supported";
                 
@@ -162,6 +169,18 @@ sub process_table {
     }
 
     $sth->finish;
+}
+
+
+
+#  INSERT 実行時に値を指定する必要のある列のみ抽出する
+sub get_cols_requires_value {
+    my ($def) = @_;
+
+    return grep { 
+        $def->{$_}{EXTRA} !~ /auto_increment/           #  auto_increment 列
+        and not defined($def->{$_}{COLUMN_DEFAULT})     #  default 値が指定済み
+    } keys %$def;
 }
 
 
@@ -216,6 +235,13 @@ sub val_int {
 }
 
 
+sub val_float {
+    my ($size, $opt) = @_;
+
+    return (($opt || '') =~ /unsigned/) ? rand() * $MAX_INT_UNSIGNED : rand() * $MAX_INT_SIGNED;
+}
+
+
 sub val_datetime {
     return DateTime->from_epoch( epoch => time + rand() * 2 * $ONE_YEAR_SEC - $ONE_YEAR_SEC )->datetime();
 }
@@ -228,5 +254,5 @@ sub get_current_ref_keys {
     my $ref_sql = "SELECT DISTINCT $col FROM $table LIMIT 100";
     my $ref_res = $dbh->selectall_arrayref($ref_sql);
 
-    return $ref_res;
+    return [ map { $_->[0] } @$ref_res ];
 }
