@@ -47,6 +47,8 @@ my %VALUE_DEF_FUNC = (
     smallint    => \&val_smallint,
     int         => \&val_int,
     bigint      => \&val_int,
+    numeric     => \&val_numeric,
+    decimal     => \&val_numeric,
     float       => \&val_float,
     double      => \&val_float,
     datetime    => \&val_datetime,
@@ -275,7 +277,7 @@ sub process_table {
                 my $func = $VALUE_DEF_FUNC{$type}
                     or die "Type $type for $key not supported";
                 
-                $value = $func->($size, $opt);
+                $value = $func->($size, $opt, $def->{$key});
             }
 
             push @values, $value;
@@ -301,7 +303,7 @@ sub determine_value {
         my $ind = rand() * @{ $cond_key->{random} };
         $value = $cond_key->{random}[$ind]; 
     }
-    elsif ( $cond_key->{fixval} ) {
+    elsif ( exists($cond_key->{fixval}) ) {
         $value = $cond_key->{fixval};
     }
 
@@ -318,6 +320,7 @@ sub get_cols_requires_value {
         or (
             $def->{$_}{EXTRA} !~ /auto_increment/           #  auto_increment 列
             and not defined($def->{$_}{COLUMN_DEFAULT})     #  default 値が指定済み
+            and $def->{$_}{IS_NULLABLE} eq 'NO'
         )
     } keys %$def;
 }
@@ -340,7 +343,16 @@ sub get_table_definition {
     my ($self, $table) = @_;
 
     my $sql = "SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?";
-    my $res = $self->dbh()->selectall_hashref($sql, 'COLUMN_NAME', undef, $self->dbname(), $table);
+    my $sth = $self->dbh()->prepare($sql);
+    $sth->bind_param(1, $self->dbname);
+    $sth->bind_param(2, $table);
+    $sth->execute();
+    my $res = {};
+    while ( my $ref = $sth->fetchrow_hashref ) {
+        my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
+        my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
+        $res->{$column_name} = $ref_uc;
+    } 
 
     return $res;
 }
@@ -350,7 +362,16 @@ sub get_constraint {
     my ($self, $table) = @_;
 
     my $sql = "SELECT * FROM information_schema.key_column_usage where table_schema = ? AND table_name = ?";
-    my $res = $self->dbh()->selectall_hashref($sql, 'COLUMN_NAME', undef, $self->dbname(), $table);
+    my $sth = $self->dbh()->prepare($sql);
+    $sth->bind_param(1, $self->dbname);
+    $sth->bind_param(2, $table);
+    $sth->execute();
+    my $res = {};
+    while ( my $ref = $sth->fetchrow_hashref ) {
+        my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
+        my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
+        $res->{$column_name} = $ref_uc;
+    }
     
     return $res;  
 }
@@ -383,6 +404,21 @@ sub val_int {
     my ($size, $opt) = @_;
 
     return (($opt || '') =~ /unsigned/) ? int(rand() * $MAX_INT_UNSIGNED) : int(rand() * $MAX_INT_SIGNED);
+}
+
+
+sub val_numeric {
+    my ($size, $opt, $def) = @_;
+
+    my $precision = $def->{NUMERIC_PRECISION};
+    my $scale     = $def->{NUMERIC_SCALE};
+
+    my $num = '';
+    $num .= int(rand() * 10) for 1 .. $precision - $scale;
+    $num .= '.';
+    $num .= int(rand() * 10) for 1 .. $scale;
+
+    return $num;
 }
 
 
