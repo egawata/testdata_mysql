@@ -195,12 +195,9 @@ assigns/doesn't assign value to the column even if its default is NULL. (Overrid
 sub insert {
     my ($self, $table, $table_cond) = @_;
 
-    #  再帰処理を行う前に、前回の条件をクリアする必要がある(外部参照以外)
+    #  再帰処理を行う前に、前回の条件をクリアする必要がある
     $self->cond({});
     $self->cond_ref() or $self->cond_ref({}); 
-
-    #  新しい条件を読み込む
-    $self->parse_table_cond($table, $table_cond);
 
     return $self->process_table($table, $table_cond);
 }
@@ -213,10 +210,11 @@ sub process_table {
     my ($self, $table, $table_cond) = @_;
     my $dbh = $self->dbh();
 
+    #  条件を読み込む
+    $self->parse_table_cond($table, $table_cond);
 
     my $def = $self->get_table_definition($table);
     my $constraint = $self->get_constraint($table);
-
 
     #  値を指定する必要のある列のみ抽出する
     my @colnames = $self->get_cols_requires_value($table, $def);
@@ -235,42 +233,63 @@ sub process_table {
             my $size = $def->{$key}{CHARACTER_MAXIMUM_LENGTH};
             my $opt  = $def->{$key}{COLUMN_TYPE};
 
+            my $value;
+
             #  外部キー制約の有無を確認
             my $const_key = $constraint->{$key};
+            my ($ref_table, $ref_col);
             if ( defined $const_key 
                 and $const_key->{REFERENCED_TABLE_SCHEMA} 
-                and my $ref_table = $const_key->{REFERENCED_TABLE_NAME} 
-                and my $ref_col   = $const_key->{REFERENCED_COLUMN_NAME} ) 
+                and $ref_table = $const_key->{REFERENCED_TABLE_NAME} 
+                and $ref_col   = $const_key->{REFERENCED_COLUMN_NAME} ) 
             {
 
-                if ( !defined( $self->cond_ref()->{$table}{$key} ) ) {
-                    my $ref_res = $self->get_current_ref_keys($ref_table, $ref_col); 
-                    if ( @$ref_res ) {
-                        $self->cond_ref()->{$table}{$key}{random} = $ref_res;
+                my $ref_ids = $self->cond_ref()->{$table}{$key}{random}
+                                || $self->get_current_ref_keys($ref_table, $ref_col); 
+                
+                if ( $self->cond()->{$table}{$key} ) {
+
+                    #  値の指定がある場合は、その値を持つレコードを必要に応じて参照先に作る
+                    $value = determine_value( $self->cond()->{$table}{$key} );
+                    
+                    if ( ! grep { $_ eq $value } @$ref_ids ) {
+
+                        $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
+                        push @{ $self->cond_ref()->{$table}{$key}{random} }, $value;            #  このIDを追加しておく
                     }
-                    else {
+
+                }
+                else {
+
+                    #  値の指定がないので、適当に参照先レコードを作成する
+
+                    #  fk = 1 のときのみ参照先テーブルにレコードを追加する。
+                    if ( $self->fk ) {
                         my $ref_keys = $self->process_table($ref_table);
-                        $ref_res = $self->get_current_ref_keys($ref_table, $ref_col);
-                        if ( @$ref_res ) {
-                            $self->cond_ref()->{$table}{$key}{random} = $ref_res;
+                        $ref_ids = $self->get_current_ref_keys($ref_table, $ref_col);
+                        if ( @$ref_ids ) {
+                            $self->cond_ref()->{$table}{$key}{random} = [ @$ref_ids ];
                         }
                         else {
                             die "Something is wrong\n";
                         }
-                    } 
+                    }
+                    else {
+                        #  do nothing
+                    }
                 }
 
             }
 
-            my $value;
-
 
             #  列に値決定のルールが設定されていればそれを使う
-            for ( $self->cond(), $self->cond_ref() ) {
-                $value = determine_value( $_->{$table}{$key} );
-                defined($value) and last;
+            if ( !defined($value) ) {
+                for ( $self->cond(), $self->cond_ref() ) {
+                    $value = determine_value( $_->{$table}{$key} );
+                    defined($value) and last;
+                }
             }
-
+            
 
             #  ルールが設定されていなければ、ランダムに値を決定する
             if ( !defined($value) ) {
@@ -299,7 +318,7 @@ sub determine_value {
 
     my $value;
 
-    if ( $cond_key->{random} ) {
+    if ( defined($cond_key->{random}) ) {
         my $ind = rand() * @{ $cond_key->{random} };
         $value = $cond_key->{random}[$ind]; 
     }
@@ -538,15 +557,12 @@ Patches are welcome.
  
 =head1 AUTHOR
  
-<Author name(s)>  (<contact address>)
+Takashi Egawa  (egawa.takashi@gmail.com)
  
  
 =head1 LICENCE AND COPYRIGHT
  
-Copyright (c) <year> <copyright holder> (<contact address>). All rights reserved.
- 
-Followed by whatever licence you wish to release it under. 
-For Perl code that is often just:
+Copyright (c) 2012 Takashi Egawa (egawa.takashi@gmail.com). All rights reserved.
  
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself. See L<perlartistic>.

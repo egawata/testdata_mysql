@@ -26,7 +26,7 @@ SQL
     $dbh->do(<<SQL);
         CREATE TABLE table1 (
             id           integer primary key auto_increment,
-            category_id  integer not null,
+            category_id  integer,
             name         varchar(20) not null,
             price        integer not null,
             constraint foreign key (category_id) references category(id)
@@ -38,7 +38,13 @@ SQL
     $handy->dbh($dbh);
     
     #$handy->insert('table1');
-    $handy->insert('table1', { name => ['Apple', 'Banana', 'Coconut' ], 'category.id' => [ 10, 20, 30 ] }) for 1 .. 10;
+    #$handy->insert('table1', { name => ['Apple', 'Banana', 'Coconut' ], 'category.id' => [ 10, 20, 30 ] }) for 1 .. 10;
+    #$handy->insert('table1', { name => ['Apple', 'Banana', 'Coconut' ], 'category_id' => 10 }) for 1 .. 10;
+    $handy->insert('table1', { 
+                name            => ['Apple', 'Banana', 'Coconut' ], 
+                category_id     => [ 10, 20, 30 ], 
+                'category.name' => [ 'Vegetable', 'Fruit' ],
+    }) for 1 .. 10;
      
     $dbh->disconnect();
        
