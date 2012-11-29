@@ -19,6 +19,9 @@ use Class::Accessor::Lite (
         'cond',
         'cond_ref',
     ],
+    ro      => [
+        'inserted',     #  All inserted ids
+    ],
 );
 
 
@@ -303,13 +306,26 @@ sub process_table {
         }
 
         $sth->execute(@values);
+        
     }
 
     $sth->finish;
 
-    return $dbh->{'mysql_insertid'};
+    my $inserted_id = $dbh->{'mysql_insertid'};
+    $self->add_inserted_id($table, $inserted_id);
+    
+    return $inserted_id;
 }
 
+
+
+#  insert したレコードのID をテーブルごとに分類して登録する
+sub add_inserted_id {
+    my ($self, $table, $id) = @_;
+
+    $self->{inserted}{$table} ||= [];
+    push @{ $self->{inserted}{$table} }, $id;
+}
 
 
 #  ルールにしたがって列値を決定する
