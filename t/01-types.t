@@ -7,7 +7,7 @@ use Test::More tests => 2;
 use DBI;
 use Test::mysqld;
 
-use Test::DataGen::mysql;
+use Test::HandyData::mysql;
 
 
 main();
@@ -26,11 +26,11 @@ sub main {
     
     $dbh->do("CREATE TABLE table_int (val integer)");
 
-    my $datagen = Test::DataGen::mysql->new($dbh);
-    my $desc = $datagen->desc('table_int');
+    my $datagen = Test::HandyData::mysql->new(dbh => $dbh);
+    my $desc = $datagen->get_table_definition('table_int');
 
     is(keys %$desc, 1, 'table_int: num of columns');
-    is($desc->type('val'), 'int', 'table_int: type of column');
+    is($desc->{val}{DATA_TYPE} , 'int', 'table_int: type of column');
 }
 
 

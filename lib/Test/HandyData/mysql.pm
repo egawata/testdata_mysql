@@ -16,11 +16,19 @@ use Class::Accessor::Lite (
         'dbh',          #  Database handle
         'fk',           #  1: Creates record on other table referenced by main table
         'nonull',       #  1: Assigns values to columns even if those default is NULL.      
-        'cond',
-        'cond_ref',
+        'cond',         #  Special conditions passed by caller.
+        'cond_ref',     #  Special conditions for referenced tables.
     ],
     ro      => [
         'inserted',     #  All inserted ids
+
+        'defs',         #  Table definitions
+                        #    $self->defs->{ $table_name }{ $column_name } = {
+                        #       COLUMN_NAME     => $column_name,
+                        #       ...
+                        #    }
+                        
+        'constraints',  #  Table constraints
     ],
 );
 
@@ -42,6 +50,8 @@ my $MAX_SMALLINT_SIGNED      = 32767;
 my $MAX_SMALLINT_UNSIGNED    = 65535;
 my $MAX_INT_SIGNED           = 2147483647;
 my $MAX_INT_UNSIGNED         = 4294967295;
+
+my $LENGTH_LIMIT_VARCHAR     = 10;
 
 my %VALUE_DEF_FUNC = (
     char        => \&val_varchar,
@@ -219,8 +229,12 @@ sub process_table {
     my $def = $self->get_table_definition($table);
     my $constraint = $self->get_constraint($table);
 
+    #  ID 列の決定
+    #my $id = get_id($table, $def, $constraint);
+
+    
     #  値を指定する必要のある列のみ抽出する
-    my @colnames = $self->get_cols_requires_value($table, $def);
+    my @colnames = $self->get_cols_requiring_value($table, $def);
 
     my $cols = join ',', @colnames;
     my $ph   = join ',', ('?') x scalar(@colnames);
@@ -346,18 +360,56 @@ sub determine_value {
 }
 
 
+#  ID 列の値を決定する
+#  TODO: 現状、単一列、整数値にしか対応していない
+#sub get_id {
+#    my ($self, $table) = @_;
+#
+#    my $table_cond = $self->get_table_definition()->{$table};
+#    my $pks = $table_cond->{-PK};
+#
+#    my $id = undef;
+#    for my $pk (@$pks) {
+#
+#        #  呼び出し元から指定された条件があればそれに従う
+#        $id = $self->determine_value( $table_cond->{$pk} );
+#
+#        #  特に指定がない場合
+#        #  auto_increment が設定されていればそれに従う
+#        unless ($id) {
+#            if ( $self->_is_auto_increment($table, $pk) ) {
+#
+#
+#
+#            
+#
+#     
+#
+#}
+
+
+sub _is_auto_increment {
+    my ($self, $table, $col) = @_;
+
+    return
+        ( $self->get_table_definition()->{$table}{$col}{EXTRA} =~ /auto_increment/ ) ? 1 : 0 ;
+}
+
+
 #  INSERT 実行時に値を指定する必要のある列のみ抽出する
-sub get_cols_requires_value {
+sub get_cols_requiring_value {
     my ($self, $table, $def) = @_;
 
     return grep { 
         defined( $self->cond()->{$table}{$_} )
         or (
-            $def->{$_}{EXTRA} !~ /auto_increment/           #  auto_increment 列
-            and not defined($def->{$_}{COLUMN_DEFAULT})     #  default 値が指定済み
+            $def->{$_}{EXTRA} !~ /auto_increment/           #  auto_increment 列でない
+            and not defined($def->{$_}{COLUMN_DEFAULT})     #  default 値が指定されていない
             and $def->{$_}{IS_NULLABLE} eq 'NO'
         )
-    } keys %$def;
+    } 
+    grep { $_ !~ /^-/ }
+    keys %$def;
 }
 
 
@@ -374,22 +426,43 @@ sub dbname {
 }
 
 
+#
+#  指定されたテーブルのテーブル定義を取得する。
+#  結果は
+#  　$res = {
+#      (colname1) => (information_schema のレコード),
+#      (colname2) => (  同上 ),
+#      ..
+#    }
+#  のような形式で返す。 
+#
 sub get_table_definition {
     my ($self, $table) = @_;
 
-    my $sql = "SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?";
-    my $sth = $self->dbh()->prepare($sql);
-    $sth->bind_param(1, $self->dbname);
-    $sth->bind_param(2, $table);
-    $sth->execute();
-    my $res = {};
-    while ( my $ref = $sth->fetchrow_hashref ) {
-        my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
-        my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
-        $res->{$column_name} = $ref_uc;
-    } 
+    $self->{defs} ||= {};
 
-    return $res;
+    unless ( $self->defs->{$table} ) {
+
+        my $sql = "SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?";
+        my $sth = $self->dbh()->prepare($sql);
+        $sth->bind_param(1, $self->dbname);
+        $sth->bind_param(2, $table);
+        $sth->execute();
+        my $res = {};
+        while ( my $ref = $sth->fetchrow_hashref ) {
+
+            #  取得された information_schema 結果のキーは環境により大文字、小文字の両方がありえるので、
+            #  キー名はすべて大文字に変換する。
+            my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
+
+            my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
+            $res->{$column_name} = $ref_uc;
+        } 
+
+        $self->defs->{$table} = { %$res };
+    }
+
+    return $self->defs->{$table};
 }
 
 
@@ -413,6 +486,9 @@ sub get_constraint {
 
 sub val_varchar {
     my ($size) = @_;
+
+    $size > $LENGTH_LIMIT_VARCHAR 
+        or $size = $LENGTH_LIMIT_VARCHAR;
 
     my $string = '';
     for (1 .. $size) {
@@ -479,6 +555,13 @@ sub get_current_ref_keys {
     return [ map { $_->[0] } @$ref_res ];
 }
 
+
+=pod parse_table_cond
+
+呼び出し元から指定された条件を読み込む。
+結果は、$self->cond に格納される。
+
+=cut
 
 sub parse_table_cond {
     my ($self, $table, $table_cond) = @_;
