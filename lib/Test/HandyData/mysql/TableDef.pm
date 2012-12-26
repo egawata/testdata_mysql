@@ -6,6 +6,9 @@ use warnings;
 use Carp;
 use Data::Dumper;
 
+use Test::HandyData::mysql::ColumnDef;
+
+
 
 =head2 new($dbh, $table_name)
 
@@ -76,7 +79,7 @@ sub def {
         $self->{definition} = $self->_get_table_definition();
     }
 
-    return $self->{definition};
+    return +{ %{ $self->{definition} } };
 }
 
 
@@ -94,7 +97,7 @@ sub constraint {
         $self->{constraint} = $self->_get_table_constraint();
     }
 
-    return $self->{constraint};
+    return +{ %{ $self->{constraint} } };
 }
 
 
@@ -116,7 +119,29 @@ sub pk_columns {
         $self->{pk_columns} = [ @pk ];
     }
     
-    return $self->{pk_columns}
+    return [ @{ $self->{pk_columns} } ];
+}
+
+
+=head2 column_def($column_name)
+
+Gets column definition (ColumnDef object)
+
+
+=cut
+
+sub column_def {
+    my ($self, $column_name) = @_;
+
+    defined $column_name
+        or confess "Column name required.";
+
+    $self->{column_def} ||= {};
+
+    my $col_def = Test::HandyData::mysql::ColumnDef->new($column_name, $self->def->{$column_name});
+    $self->{column_def}{$column_name} = $col_def;
+
+    return $self->{column_def}{$column_name};    
 }
 
 
