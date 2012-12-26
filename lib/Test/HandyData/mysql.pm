@@ -32,6 +32,8 @@ use Class::Accessor::Lite (
     ],
 );
 
+use Test::HandyData::mysql::TableDef;
+
 
 ###############
 #
@@ -230,7 +232,7 @@ sub process_table {
     my $constraint = $self->get_constraint($table);
 
     #  ID 列の決定
-    #my $id = get_id($table, $def, $constraint);
+    my $id = $self->get_id($table);
 
     
     #  値を指定する必要のある列のみ抽出する
@@ -362,30 +364,36 @@ sub determine_value {
 
 #  ID 列の値を決定する
 #  TODO: 現状、単一列、整数値にしか対応していない
-#sub get_id {
-#    my ($self, $table) = @_;
-#
-#    my $table_cond = $self->get_table_definition()->{$table};
-#    my $pks = $table_cond->{-PK};
-#
-#    my $id = undef;
-#    for my $pk (@$pks) {
-#
-#        #  呼び出し元から指定された条件があればそれに従う
-#        $id = $self->determine_value( $table_cond->{$pk} );
-#
-#        #  特に指定がない場合
-#        #  auto_increment が設定されていればそれに従う
-#        unless ($id) {
-#            if ( $self->_is_auto_increment($table, $pk) ) {
-#
-#
-#
-#            
-#
-#     
-#
-#}
+sub get_id {
+    my ($self, $table) = @_;
+
+    my $table_def = $self->table_def($table);
+    my $pks = $table_def->pk_columns();
+
+    my $id = undef;
+    for my $col (@$pks) {
+
+        my $col_def = $table_def->column_def($col);
+
+        #  呼び出し元から指定された条件があればそれに従う
+        $id = $self->user_value($col_def);
+          
+
+        #  特に指定がない場合
+        #  auto_increment が設定されていればそれに従う
+        #  なければランダムな値を生成する。
+        unless ($id) {
+            if ( $col_def->is_auto_increment() ) {
+                $id = $self->get_auto_increment_value($table_def);
+            }
+            else {
+                $id = $self->get_rand_value($col_def);
+            }
+        }
+    }
+
+    return $id;             
+}
 
 
 sub _is_auto_increment {
@@ -423,6 +431,17 @@ sub dbname {
     }
     
     return $self->{dbname}; 
+}
+
+
+sub table_def {
+    my ($self, $table) = @_;
+
+    $self->{_table_def} ||= {};
+
+    $self->{_table_def}{$table} ||= Test::HandyData::mysql::TableDef->new( $self->dbh, $table );
+
+    return $self->{_table_def}{$table};
 }
 
 

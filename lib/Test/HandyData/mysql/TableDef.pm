@@ -4,16 +4,46 @@ use strict;
 use warnings;
 
 use Carp;
+use Data::Dumper;
 
+
+=head2 new($dbh, $table_name)
+
+Constructor.
+
+=cut
 
 sub new {
-    my ($inv, $params) = @_;
+    my ($inv, $dbh, $table_name) = @_;
 
     my $class = ref $inv || $inv;
     my $self = bless {}, $class;
 
+    
+    $self->dbh($dbh) if $dbh;
+    $self->table_name($table_name) if $table_name;
+
     $self;
 }
+
+
+
+
+=head2 dbh($dbh)
+
+Sets/gets database handle.
+
+=cut
+
+sub dbh {
+    my ($self, $dbh) = @_;
+
+    defined $dbh
+        and $self->{dbh} = $dbh;
+
+    return $self->{dbh};
+}
+
 
 
 =head2 table_name($name)
@@ -80,8 +110,8 @@ sub pk_columns {
     unless ( $self->{pk_columns} ) {
         my $constraint = $self->constraint;
         my @pk = ();        
-        for my $col ( keys %$constraint) {
-            push @pk, $col if $def->{$col}{CONSTRAINT_NAME} eq 'PRIMARY';
+        for my $col ( sort { $constraint->{$a}{ORDINAL_POSITION} <=> $constraint->{$b}{ORDINAL_POSITION} } keys %$constraint ) {
+            push @pk, $col if $constraint->{$col}{CONSTRAINT_NAME} eq 'PRIMARY';
         }
         $self->{pk_columns} = [ @pk ];
     }
@@ -105,8 +135,8 @@ sub _get_table_definition {
 
     my $sql = "SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?";
     my $sth = $self->dbh()->prepare($sql);
-    $sth->bind_param(1, $self->dbname);
-    $sth->bind_param(2, $table);
+    $sth->bind_param(1, $self->_dbname);
+    $sth->bind_param(2, $self->table_name);
     $sth->execute();
     my $res = {};
     while ( my $ref = $sth->fetchrow_hashref ) {
@@ -154,8 +184,8 @@ sub _get_table_constraint {
           AND table_name = ?
     };
     my $sth = $self->dbh()->prepare($sql);
-    $sth->bind_param(1, $self->dbname);
-    $sth->bind_param(2, $table);
+    $sth->bind_param(1, $self->_dbname);
+    $sth->bind_param(2, $self->table_name);
     $sth->execute();
 
     my $res = {};
@@ -169,6 +199,19 @@ sub _get_table_constraint {
     return $res;  
 }
 
+
+
+sub _dbname {
+    my ($self) = @_;
+
+    unless ( $self->{_dbname} ) {
+        my $res = $self->dbh()->selectall_arrayref('SELECT DATABASE()');
+        $self->{_dbname} = $res->[0]->[0]
+            or confess "Failed to get dbname";
+    }
+    
+    return $self->{_dbname}; 
+}
 
 
 
