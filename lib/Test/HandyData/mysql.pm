@@ -10,13 +10,13 @@ use DBI;
 use Data::Dumper;
 use DateTime;
 use Carp;
+use Log::Minimal;
 use Class::Accessor::Lite (
     new     => 1,
     rw      => [
         'dbh',          #  Database handle
         'fk',           #  1: Creates record on other table referenced by main table
         'nonull',       #  1: Assigns values to columns even if those default is NULL.      
-        'cond',         #  Special conditions passed by caller.
         'cond_ref',     #  Special conditions for referenced tables.
     ],
     ro      => [
@@ -208,13 +208,11 @@ assigns/doesn't assign value to the column even if its default is NULL. (Overrid
 =cut
 
 sub insert {
-    my ($self, $table, $table_cond) = @_;
+    my ($self, $table_name, $table_cond) = @_;
 
-    #  再帰処理を行う前に、前回の条件をクリアする必要がある
-    $self->cond({});
-    $self->cond_ref() or $self->cond_ref({}); 
+    $self->set_user_cond($table_name, $table_cond);
 
-    return $self->process_table($table, $table_cond);
+    return $self->process_table($table_name, $table_cond);
 }
 
 
@@ -226,13 +224,14 @@ sub process_table {
     my $dbh = $self->dbh();
 
     #  条件を読み込む
-    $self->parse_table_cond($table, $table_cond);
+    #$self->parse_table_cond($table, $table_cond);
 
     my $def = $self->get_table_definition($table);
     my $constraint = $self->get_constraint($table);
 
     #  ID 列の決定
-    #my $id = $self->get_id($table);
+    my $id = $self->get_id($table);
+    print "ID is $id\n";
 
     
     #  値を指定する必要のある列のみ抽出する
@@ -269,7 +268,7 @@ sub process_table {
                 if ( $self->cond()->{$table}{$key} ) {
 
                     #  値の指定がある場合は、その値を持つレコードを必要に応じて参照先に作る
-                    $value = determine_value( $self->cond()->{$table}{$key} );
+                    $value = $self->determine_value( $self->cond()->{$table}{$key} );
                     
                     if ( ! grep { $_ eq $value } @$ref_ids ) {
 
@@ -304,7 +303,7 @@ sub process_table {
             #  列に値決定のルールが設定されていればそれを使う
             if ( !defined($value) ) {
                 for ( $self->cond(), $self->cond_ref() ) {
-                    $value = determine_value( $_->{$table}{$key} );
+                    $value = $self->determine_value( $_->{$table}{$key} );
                     defined($value) and last;
                 }
             }
@@ -334,6 +333,15 @@ sub process_table {
 }
 
 
+sub cond {
+    my ($self, $_cond) = @_;
+
+    defined $_cond and ref $_cond eq 'HASH'
+        and $self->{_cond} = $_cond;
+
+    return $self->{_cond} || {};
+}
+
 
 #  insert したレコードのID をテーブルごとに分類して登録する
 sub add_inserted_id {
@@ -346,7 +354,7 @@ sub add_inserted_id {
 
 #  ルールにしたがって列値を決定する
 sub determine_value {
-    my ($cond_key) = @_;
+    my ($self, $cond_key) = @_;
 
     my $value;
 
@@ -372,21 +380,32 @@ sub get_id {
 
     my $id = undef;
     for my $col (@$pks) {
+        debugf("key_column: $col");
 
         my $col_def = $table_def->column_def($col);
-
+        
 
         #  呼び出し元から指定された条件があればそれに従う
         #  特に指定がない場合
         #  auto_increment が設定されていればそれに従う
         #  なければランダムな値を生成する。
-        my $id;  
-        unless ( $id = $self->user_value($col_def) ) {
+        unless ( $self->cond()->{$table} and $self->cond()->{$table}{$col} and $id = $self->determine_value( $self->cond()->{$table}{$col} ) ) {
+
+            debugf("user value is not specified");
             if ( $col_def->is_auto_increment() ) {
-                $id = $self->get_auto_increment_value($table);
+                debugf("Column $col is an auto_increment");
+                $id = $self->get_auto_increment_value($table_def);
+
             }
             else {
-                $id = $self->get_rand_value($col_def);
+                debugf("Column $col is not an auto_increment");
+                my $type = $col_def->data_type;
+                my $size = $col_def->character_maximum_length;
+                my $func = $VALUE_DEF_FUNC{$type}
+                    or die "Type $type for $col not supported";
+                
+                $id = $func->($size, undef, $col_def);
+
             }
         }
     }
@@ -576,15 +595,37 @@ sub get_current_ref_keys {
 
 =pod parse_table_cond
 
-呼び出し元から指定された条件を読み込む。
-結果は、$self->cond に格納される。
-
+(deprecated) 以降は set_user_cond を使うこと
 =cut
 
 sub parse_table_cond {
     my ($self, $table, $table_cond) = @_;
 
+    $self->set_user_cond($table, $table_cond);
+}
+
+
+=pod set_user_cond($table_name, $cond)
+
+次回 insert を実行したときの条件を設定する。
+(これまで設定していた条件はクリアされる)
+
+
+=cut
+
+sub set_user_cond {
+    my ($self, $table, $table_cond) = @_;
+
+    debugf("start set_user_cond");
+
     return unless $table_cond and ref $table_cond eq 'HASH';
+
+    debugf("Valid parameter");
+
+    #  前回の条件をクリア
+    $self->cond({});
+    $self->cond_ref() or $self->cond_ref({}); 
+
 
     for my $col (keys %$table_cond) {
         
@@ -610,6 +651,7 @@ sub parse_table_cond {
         }
     }
 
+    debugf("result cond : " . Dumper($self->cond()));
 }   
 
 

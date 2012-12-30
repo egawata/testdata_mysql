@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 2;
+use Test::More tests => 3;
 use DBI;
 use Test::mysqld;
 
@@ -53,7 +53,7 @@ sub main {
     ) or die $DBI::errstr;
 
     test_0($dbh); 
-    #test_1($dbh);
+    test_1($dbh);
      
 
     $dbh->disconnect;
@@ -66,6 +66,9 @@ sub main {
 
 (0)insert() の呼び出し元メソッドで明示的に指定
 その値をそのまま使う。
+
+(1)単一列、整数型、auto_increment あり。
+auto_increment の値に従う
 
 =cut
 
@@ -82,27 +85,37 @@ sub test_0 {
 
     my $hd = Test::HandyData::mysql->new(dbh => $dbh);
 
-    my $id = $hd->insert('table_test_0', { id => 99 });
+    #  specifies key value
+    $hd->set_user_cond('table_test_0', { id => 99 });
+    my $id = $hd->get_id('table_test_0');
     is($id, 99);
 
-    $id = $hd->insert('table_test_0');
+    #  auto_increment is incremented from 99 to 100
+    $hd->insert('table_test_0');
+
+    #  clear conditions
+    $hd->set_user_cond('table_test_0', {});
+
+    #  retrieves next auto_increment value (maybe 100)
+    $id = $hd->get_id('table_test_0');
     is($id, 100);
 }
 
 
-=pod test_1
-
-以下のケースをテストする
-
-(1)単一列、整数型、auto_increment あり。
-auto_increment の値に従う
-
-=cut
-
 sub test_1 {
+    my ($dbh) = @_;
 
+    $dbh->do(q{
+        CREATE TABLE table_test_1 (
+            id      integer primary key,
+            str     varchar(10)
+        )
+    });
+
+    my $hd = Test::HandyData::mysql->new(dbh => $dbh);
+    my $id = $hd->get_id('table_test_1');
+    ok($id =~ /^\d+$/, "no auto_increment column. result id = $id");
 }
-
 
 
 
