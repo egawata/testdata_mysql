@@ -67,6 +67,20 @@ sub table_name {
 
 
 
+=head2 colnames()
+
+Gets all columns in this table.
+
+=cut
+
+sub colnames {
+    my ($self) = @_;
+
+    my $def = $self->def();
+    return wantarray ? keys %$def : [ keys %$def ];
+}
+
+
 =head2 def()
 
 Gets table definition.

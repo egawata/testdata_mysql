@@ -424,18 +424,34 @@ sub _is_auto_increment {
 
 #  INSERT 実行時に値を指定する必要のある列のみ抽出する
 sub get_cols_requiring_value {
-    my ($self, $table, $def) = @_;
+    my ($self, $table) = @_;
 
-    return grep { 
-        defined( $self->cond()->{$table}{$_} )
-        or (
-            $def->{$_}{EXTRA} !~ /auto_increment/           #  auto_increment 列でない
-            and not defined($def->{$_}{COLUMN_DEFAULT})     #  default 値が指定されていない
-            and $def->{$_}{IS_NULLABLE} eq 'NO'
-        )
-    } 
-    grep { $_ !~ /^-/ }
-    keys %$def;
+    my $table_def = $self->table_def($table);
+
+    my @cols = ();
+    for my $col ( $table_def->colnames ) {
+
+        #  ユーザから値の指定がある場合は、必ずそれを使って指定する。
+        #  なければ、列定義により、指定の要否を決める。
+        unless ( defined( $self->cond()->{$table}{$col} ) ) {
+
+            my $col_def = $table_def->column_def($col);
+
+            #  auto_increment 列は指定の必要なし
+            next if $col_def->is_auto_increment;
+
+            #  default 値が指定されている場合はそれを使用するので、指定の必要なし
+            next if defined($col_def->column_default);
+
+            #  NULL 値が認められているのであれば指定しない
+            next if $col_def->is_nullable eq 'YES';
+
+        }
+
+        push @cols, $col;
+    }
+
+    return [ @cols ];
 }
 
 
@@ -616,11 +632,12 @@ sub parse_table_cond {
 sub set_user_cond {
     my ($self, $table, $table_cond) = @_;
 
-    debugf("start set_user_cond");
+    defined $table and $table =~ /^\w+$/
+        or confess "Invalid table name [$table]";
 
-    return unless $table_cond and ref $table_cond eq 'HASH';
+    defined $table_cond and ref $table_cond eq 'HASH'
+        or confess "Invalid user condition. " . Dumper($table_cond);
 
-    debugf("Valid parameter");
 
     #  前回の条件をクリア
     $self->cond({});
