@@ -232,7 +232,7 @@ sub process_table {
     my $constraint = $self->get_constraint($table);
 
     #  ID 列の決定
-    my $id = $self->get_id($table);
+    #my $id = $self->get_id($table);
 
     
     #  値を指定する必要のある列のみ抽出する
@@ -375,16 +375,15 @@ sub get_id {
 
         my $col_def = $table_def->column_def($col);
 
-        #  呼び出し元から指定された条件があればそれに従う
-        $id = $self->user_value($col_def);
-          
 
+        #  呼び出し元から指定された条件があればそれに従う
         #  特に指定がない場合
         #  auto_increment が設定されていればそれに従う
         #  なければランダムな値を生成する。
-        unless ($id) {
+        my $id;  
+        unless ( $id = $self->user_value($col_def) ) {
             if ( $col_def->is_auto_increment() ) {
-                $id = $self->get_auto_increment_value($table_def);
+                $id = $self->get_auto_increment_value($table);
             }
             else {
                 $id = $self->get_rand_value($col_def);
@@ -614,6 +613,12 @@ sub parse_table_cond {
 }   
 
 
+
+sub get_auto_increment_value {
+    my ($self, $table_def) = @_;
+
+    return $table_def->get_auto_increment_value();
+}
 
 
 

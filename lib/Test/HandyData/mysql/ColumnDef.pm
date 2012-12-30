@@ -42,6 +42,12 @@ sub new {
 }
 
 
+sub is_auto_increment {
+    my ($self) = @_;
+
+    return ( $self->{EXTRA} =~ /auto_increment/ ) ? 1 : 0;
+}
+
 
 
 

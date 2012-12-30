@@ -44,6 +44,7 @@ sub dbh {
     defined $dbh
         and $self->{dbh} = $dbh;
 
+    $self->{dbh} or confess "No dbh specified";
     return $self->{dbh};
 }
 
@@ -60,6 +61,7 @@ sub table_name {
 
     defined $name and $self->{table_name} = $name;
 
+    defined $self->{table_name} or confess "No table name specified";
     return $self->{table_name};
 }
 
@@ -145,6 +147,31 @@ sub column_def {
 }
 
 
+=head2 get_auto_increment_value()
+
+auto_increment が次に生成する値を取得する。
+
+
+=cut
+
+sub get_auto_increment_value {
+    my ($self) = @_;
+
+    my $table = $self->table_name;
+
+    my $sql = q{SELECT AUTO_INCREMENT FROM information_schema.tables WHERE table_schema = ? AND table_name = ?};
+    my $sth = $self->dbh()->prepare($sql);
+    $sth->bind_param(1, $self->_dbname);
+    $sth->bind_param(2, $self->table_name);
+    $sth->execute();
+
+    my $ref = $sth->fetchrow_hashref();
+    my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
+
+    return $ref_uc->{AUTO_INCREMENT};
+}
+
+
 #
 #  指定されたテーブルのテーブル定義を取得する。
 #  結果は
@@ -158,7 +185,7 @@ sub column_def {
 sub _get_table_definition {
     my ($self, $table) = @_;
 
-    my $sql = "SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?";
+    my $sql = q{SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?};
     my $sth = $self->dbh()->prepare($sql);
     $sth->bind_param(1, $self->_dbname);
     $sth->bind_param(2, $self->table_name);
