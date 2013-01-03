@@ -43,6 +43,10 @@ sub new {
 }
 
 
+
+sub name { shift->{name}; }
+
+
 sub is_auto_increment {
     my ($self) = @_;
 

@@ -117,6 +117,21 @@ sub constraint {
 }
 
 
+
+=head2 is_pk($colname) 
+
+Returns 1 if $colname is one of primary key columns. Otherwise returns 0.
+
+=cut
+
+sub is_pk {
+    my ($self, $colname) = @_;
+
+    return 
+        grep { $_ eq $colname } @{ $self->pk_columns() } ? 1 : 0;
+}
+
+
 =head2 pk_columns()
 
 Gets column names of primary keys

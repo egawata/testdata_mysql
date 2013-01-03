@@ -210,7 +210,8 @@ assigns/doesn't assign value to the column even if its default is NULL. (Overrid
 sub insert {
     my ($self, $table_name, $table_cond) = @_;
 
-    $self->set_user_cond($table_name, $table_cond);
+    $table_cond
+        and $self->set_user_cond($table_name, $table_cond);
 
     return $self->process_table($table_name, $table_cond);
 }
@@ -226,32 +227,36 @@ sub process_table {
     #  条件を読み込む
     #$self->parse_table_cond($table, $table_cond);
 
-    my $def = $self->get_table_definition($table);
+    #my $def = $self->get_table_definition($table);
     my $constraint = $self->get_constraint($table);
+    my $table_def = $self->table_def($table);
+    my $def = $table_def->def;
+    #my $constraint = $table_def->constraint;
 
     #  ID 列の決定
-    my $id = $self->get_id($table);
-    print "ID is $id\n";
+    my ($exp_id, $real_id) = $self->get_id($table);
+    print "ID is ($exp_id, $real_id)\n";
 
     
     #  値を指定する必要のある列のみ抽出する
     my @colnames = $self->get_cols_requiring_value($table, $def);
 
-    my $cols = join ',', @colnames;
-    my $ph   = join ',', ('?') x scalar(@colnames);
-    my $sql = "INSERT INTO $table ($cols) VALUES ($ph)";
-
+    my $sql = $self->_make_insert_sql($table, \@colnames);
     my $sth = $dbh->prepare($sql);
 
     {
         my @values = ();
+
         for my $key (@colnames) {
 
-            my $type = $def->{$key}{DATA_TYPE};
-            my $size = $def->{$key}{CHARACTER_MAXIMUM_LENGTH};
-            my $opt  = $def->{$key}{COLUMN_TYPE};
-
             my $value;
+
+            if ( $table_def->is_pk($key) and $real_id ) {
+                print "Primary key : $real_id\n";
+                push @values, $real_id;
+                next;
+            }
+
 
             #  外部キー制約の有無を確認
             my $const_key = $constraint->{$key};
@@ -311,10 +316,13 @@ sub process_table {
 
             #  ルールが設定されていなければ、ランダムに値を決定する
             if ( !defined($value) ) {
+                my $col_def = $table_def->column_def($key) or confess "No column def found. $key";
+                my $type = $col_def->data_type;
                 my $func = $VALUE_DEF_FUNC{$type}
-                    or die "Type $type for $key not supported";
+                    or die "Type $type for $key not supported". Dumper($def);
                 
-                $value = $func->($size, $opt, $def->{$key});
+                #$value = $func->($size, $opt, $def->{$key});
+                $value = $self->$func($col_def, $exp_id);
             }
 
             push @values, $value;
@@ -378,9 +386,10 @@ sub get_id {
     my $table_def = $self->table_def($table);
     my $pks = $table_def->pk_columns();
 
-    my $id = undef;
+    my ($exp_id, $real_id);
     for my $col (@$pks) {
         debugf("key_column: $col");
+        debugf("Cond: " . Dumper($self->cond()->{$table}{$col}));
 
         my $col_def = $table_def->column_def($col);
         
@@ -389,12 +398,17 @@ sub get_id {
         #  特に指定がない場合
         #  auto_increment が設定されていればそれに従う
         #  なければランダムな値を生成する。
-        unless ( $self->cond()->{$table} and $self->cond()->{$table}{$col} and $id = $self->determine_value( $self->cond()->{$table}{$col} ) ) {
+        if ( $self->cond()->{$table} and $self->cond()->{$table}{$col} and $real_id = $self->determine_value( $self->cond()->{$table}{$col} ) ) {
+            $exp_id = $real_id;
+        }
+        else {
 
             debugf("user value is not specified");
             if ( $col_def->is_auto_increment() ) {
                 debugf("Column $col is an auto_increment");
-                $id = $self->get_auto_increment_value($table_def);
+                $exp_id = $self->get_auto_increment_value($table_def);
+                
+                #  real_id は insert 時に決まるため、undef のままにしておく。
 
             }
             else {
@@ -404,13 +418,13 @@ sub get_id {
                 my $func = $VALUE_DEF_FUNC{$type}
                     or die "Type $type for $col not supported";
                 
-                $id = $func->($size, undef, $col_def);
+                $exp_id = $real_id = $self->$func($col_def);
 
             }
         }
     }
 
-    return $id;             
+    return ($exp_id, $real_id);             
 }
 
 
@@ -451,7 +465,7 @@ sub get_cols_requiring_value {
         push @cols, $col;
     }
 
-    return [ @cols ];
+    return wantarray ? @cols : [ @cols ];
 }
 
 
@@ -537,45 +551,98 @@ sub get_constraint {
     return $res;  
 }
 
+
+sub _make_insert_sql {
+    my ($self, $table_name, $colnames) = @_;
+
+    my $cols = join ',', @$colnames;
+    my $ph   = join ',', ('?') x scalar(@$colnames);
+    my $sql  = "INSERT INTO $table_name ($cols) VALUES ($ph)";
+
+    return $sql;
+}
+
+
 sub val_varchar {
-    my ($size) = @_;
+    my ($self, $col_def, $exp_id) = @_;
 
-    $size > $LENGTH_LIMIT_VARCHAR 
-        or $size = $LENGTH_LIMIT_VARCHAR;
+    my $maxlen = $col_def->character_maximum_length;
 
-    my $string = '';
-    for (1 .. $size) {
-        $string .= $VARCHAR_LIST[ int( rand() * $COUNT_VARCHAR_LIST ) ];
+    my $num_length = length($exp_id);
+    my $colname = $col_def->name;
+    my $colname_length = length($colname);
+
+    if ( $colname_length + $num_length + 1 <= $maxlen ) {       #  (colname)_(num)
+        return sprintf("%s_%d", $colname, $exp_id);
+    }
+    elsif ( $num_length + 1 <= $maxlen ) {                      #  (part_of_colname)_(num)
+        my $part_of_colname = substr($colname, 0, $maxlen - $num_length - 1);
+        return sprintf("%s_%d", $part_of_colname, $exp_id);
+    }
+    elsif ( $num_length == $maxlen ) {
+        return $exp_id;
+    }   
+    else {                                                      #  random string
+        $maxlen > $LENGTH_LIMIT_VARCHAR 
+            or $maxlen = $LENGTH_LIMIT_VARCHAR;
+
+        my $string = '';
+        for (1 .. $maxlen) {
+            $string .= $VARCHAR_LIST[ int( rand() * $COUNT_VARCHAR_LIST ) ];
+        }
+
+        return $string;
     }
 
-    return $string;
 }
 
 
 sub val_tinyint {
+    my ($self, $col_def) = @_;
+
+    _val_tinyint($col_def->character_maximum_length, $col_def->column_type);
+}
+
+
+sub _val_tinyint {
     my ($size, $opt) = @_;
 
     return (($opt || '') =~ /unsigned/) ? int(rand() * $MAX_TINYINT_UNSIGNED) : int(rand() * $MAX_TINYINT_SIGNED);
 }
 
+
 sub val_smallint {
-    my ($size, $opt) = @_;
+    my ($self, $col_def) = @_;
+
+    _val_smallint($col_def->character_maximum_length, $col_def->column_type);
+}
+
+
+sub _val_smallint { my ($size, $opt) = @_;
 
     return (($opt || '') =~ /unsigned/) ? int(rand() * $MAX_SMALLINT_UNSIGNED) : int(rand() * $MAX_SMALLINT_SIGNED);
 }
 
 sub val_int {
+    my ($self, $col_def) = @_;
+    $col_def or confess "Undefined col_def";
+
+    _val_int($col_def->character_maximum_length, $col_def->column_type);
+}
+
+sub _val_int {
     my ($size, $opt) = @_;
 
     return (($opt || '') =~ /unsigned/) ? int(rand() * $MAX_INT_UNSIGNED) : int(rand() * $MAX_INT_SIGNED);
 }
 
 
-sub val_numeric {
-    my ($size, $opt, $def) = @_;
 
-    my $precision = $def->{NUMERIC_PRECISION};
-    my $scale     = $def->{NUMERIC_SCALE};
+sub val_numeric {
+    my ($self, $col_def) = @_;
+
+    my $precision = $col_def->numeric_precision;
+    my $scale     = $col_def->numeric_scale;
 
     my $num = '';
     $num .= int(rand() * 10) for 1 .. $precision - $scale;
@@ -587,13 +654,23 @@ sub val_numeric {
 
 
 sub val_float {
+    my ($self, $col_def) = @_;
+
+    _val_float($col_def->character_maximum_length, $col_def->column_type);
+}
+
+
+sub _val_float {
     my ($size, $opt) = @_;
 
     return (($opt || '') =~ /unsigned/) ? rand() * $MAX_INT_UNSIGNED : rand() * $MAX_INT_SIGNED;
 }
 
 
+
 sub val_datetime {
+    my ($self, $col_def) = @_;
+
     return DateTime->from_epoch( epoch => time + rand() * 2 * $ONE_YEAR_SEC - $ONE_YEAR_SEC )->datetime();
 }
 
@@ -637,7 +714,6 @@ sub set_user_cond {
 
     defined $table_cond and ref $table_cond eq 'HASH'
         or confess "Invalid user condition. " . Dumper($table_cond);
-
 
     #  前回の条件をクリア
     $self->cond({});

@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 3;
+use Test::More tests => 5;
 use DBI;
 use Test::mysqld;
 
@@ -87,18 +87,21 @@ sub test_0 {
 
     #  specifies key value
     $hd->set_user_cond('table_test_0', { id => 99 });
-    my $id = $hd->get_id('table_test_0');
-    is($id, 99);
+    my ($exp_id, $real_id) = $hd->get_id('table_test_0');
+    is($exp_id, 99);
+    is($real_id, 99);
 
     #  auto_increment is incremented from 99 to 100
-    $hd->insert('table_test_0');
+    my $id = $hd->insert('table_test_0');
+    print "ID: $id\n";
 
     #  clear conditions
     $hd->set_user_cond('table_test_0', {});
 
     #  retrieves next auto_increment value (maybe 100)
-    $id = $hd->get_id('table_test_0');
-    is($id, 100);
+    ($exp_id, $real_id) = $hd->get_id('table_test_0');
+    is($exp_id, 100);
+    is($real_id, undef);
 }
 
 

@@ -48,12 +48,12 @@ sub main {
 
     my $result = $sth->fetchrow_hashref();
 
-    is($result->{string0}, 'string0_10');
-    is($result->{string1}, 'string1_9');
-    is($result->{string2}, 'string_8');
-    is($result->{string3}, 'strin_7');
-    is($result->{string4}, 'stri_6');
-    is($result->{string5}, '_2');
+    is($result->{string0}, 'string0_1');
+    is($result->{string1}, 'string1_1');
+    is($result->{string2}, 'string_1');
+    is($result->{string3}, 'strin_1');
+    is($result->{string4}, 'stri_1');
+    is($result->{string5}, '_1');
     is($result->{string6}, '1');
 
     $dbh->do(q{ALTER TABLE table_varchar AUTO_INCREMENT = 1234567});  #  next ID = 1234567
