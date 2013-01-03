@@ -213,7 +213,7 @@ sub insert {
     $table_cond
         and $self->set_user_cond($table_name, $table_cond);
 
-    return $self->process_table($table_name, $table_cond);
+    return $self->process_table($table_name);
 }
 
 
@@ -224,18 +224,20 @@ sub process_table {
     my ($self, $table, $table_cond) = @_;
     my $dbh = $self->dbh();
 
-    #  条件を読み込む
-    #$self->parse_table_cond($table, $table_cond);
+    #  条件の追加指定があればそれを読み込む
+    $table_cond 
+        and $self->add_user_cond($table, $table_cond);
 
     #my $def = $self->get_table_definition($table);
-    my $constraint = $self->get_constraint($table);
+    #my $constraint = $self->get_constraint($table);
     my $table_def = $self->table_def($table);
     my $def = $table_def->def;
-    #my $constraint = $table_def->constraint;
+    my $constraint = $table_def->constraint;
+    debugf("Current constraint : " .  Dumper($constraint));
 
     #  ID 列の決定
     my ($exp_id, $real_id) = $self->get_id($table);
-    print "ID is ($exp_id, $real_id)\n";
+    debugf("ID is ($exp_id, $real_id)");
 
     
     #  値を指定する必要のある列のみ抽出する
@@ -252,7 +254,7 @@ sub process_table {
             my $value;
 
             if ( $table_def->is_pk($key) and $real_id ) {
-                print "Primary key : $real_id\n";
+                debugf("Value of primary key : $real_id");
                 push @values, $real_id;
                 next;
             }
@@ -266,6 +268,7 @@ sub process_table {
                 and $ref_table = $const_key->{REFERENCED_TABLE_NAME} 
                 and $ref_col   = $const_key->{REFERENCED_COLUMN_NAME} ) 
             {
+                debugf("Column $key is a foreign key references $ref_table.$ref_col.");
 
                 my $ref_ids = $self->cond_ref()->{$table}{$key}{random}
                                 || $self->get_current_ref_keys($ref_table, $ref_col); 
@@ -291,6 +294,7 @@ sub process_table {
                         my $ref_keys = $self->process_table($ref_table);
                         $ref_ids = $self->get_current_ref_keys($ref_table, $ref_col);
                         if ( @$ref_ids ) {
+                            debugf("New ids for referenced table ($ref_table) : " . Dumper($ref_ids));
                             $self->cond_ref()->{$table}{$key}{random} = [ @$ref_ids ];
                         }
                         else {
@@ -328,14 +332,17 @@ sub process_table {
             push @values, $value;
         }
 
+        debugf(sprintf( "INSERT INTO %s (%s) VALUES (%s)", $table, (join ',', @colnames), (join ',', @values) ));
         $sth->execute(@values);
         
     }
 
     $sth->finish;
 
-    my $inserted_id = $dbh->{'mysql_insertid'};
+    my $inserted_id = $real_id || $dbh->{'mysql_insertid'};
     $self->add_inserted_id($table, $inserted_id);
+   
+    debugf("Inserted. table = $table, id = $inserted_id");
     
     return $inserted_id;
 }
@@ -385,10 +392,11 @@ sub get_id {
 
     my $table_def = $self->table_def($table);
     my $pks = $table_def->pk_columns();
+    debugf("Table Cond: " . Dumper($self->cond()->{$table}));
 
     my ($exp_id, $real_id);
     for my $col (@$pks) {
-        debugf("key_column: $col");
+        debugf("key_column: $table.$col");
         debugf("Cond: " . Dumper($self->cond()->{$table}{$col}));
 
         my $col_def = $table_def->column_def($col);
@@ -600,40 +608,26 @@ sub val_varchar {
 sub val_tinyint {
     my ($self, $col_def) = @_;
 
-    _val_tinyint($col_def->character_maximum_length, $col_def->column_type);
-}
+    my $type = $col_def->column_type;
 
-
-sub _val_tinyint {
-    my ($size, $opt) = @_;
-
-    return (($opt || '') =~ /unsigned/) ? int(rand() * $MAX_TINYINT_UNSIGNED) : int(rand() * $MAX_TINYINT_SIGNED);
+    return (($type || '') =~ /unsigned/) ? int(rand() * $MAX_TINYINT_UNSIGNED) : int(rand() * $MAX_TINYINT_SIGNED);
 }
 
 
 sub val_smallint {
     my ($self, $col_def) = @_;
 
-    _val_smallint($col_def->character_maximum_length, $col_def->column_type);
-}
+    my $type = $col_def->column_type;
 
-
-sub _val_smallint { my ($size, $opt) = @_;
-
-    return (($opt || '') =~ /unsigned/) ? int(rand() * $MAX_SMALLINT_UNSIGNED) : int(rand() * $MAX_SMALLINT_SIGNED);
+    return (($type || '') =~ /unsigned/) ? int(rand() * $MAX_SMALLINT_UNSIGNED) : int(rand() * $MAX_SMALLINT_SIGNED);
 }
 
 sub val_int {
     my ($self, $col_def) = @_;
-    $col_def or confess "Undefined col_def";
 
-    _val_int($col_def->character_maximum_length, $col_def->column_type);
-}
+    my $type = $col_def->column_type;
 
-sub _val_int {
-    my ($size, $opt) = @_;
-
-    return (($opt || '') =~ /unsigned/) ? int(rand() * $MAX_INT_UNSIGNED) : int(rand() * $MAX_INT_SIGNED);
+    return (($type || '') =~ /unsigned/) ? int(rand() * $MAX_INT_UNSIGNED) : int(rand() * $MAX_INT_SIGNED);
 }
 
 
@@ -656,14 +650,9 @@ sub val_numeric {
 sub val_float {
     my ($self, $col_def) = @_;
 
-    _val_float($col_def->character_maximum_length, $col_def->column_type);
-}
+    my $type = $col_def->column_type;
 
-
-sub _val_float {
-    my ($size, $opt) = @_;
-
-    return (($opt || '') =~ /unsigned/) ? rand() * $MAX_INT_UNSIGNED : rand() * $MAX_INT_SIGNED;
+    return (($type || '') =~ /unsigned/) ? rand() * $MAX_INT_UNSIGNED : rand() * $MAX_INT_SIGNED;
 }
 
 
@@ -709,15 +698,29 @@ sub parse_table_cond {
 sub set_user_cond {
     my ($self, $table, $table_cond) = @_;
 
+    #  前回の条件をクリア
+    $self->cond({});
+    $self->cond_ref() or $self->cond_ref({}); 
+
+    $self->add_user_cond($table, $table_cond);
+}
+
+
+=pod add_user_cond
+
+次回 insert を実行したときの条件を設定する。
+(これまで設定していた条件に追加する)
+
+=cut
+
+sub add_user_cond {
+    my ($self, $table, $table_cond) = @_;
+
     defined $table and $table =~ /^\w+$/
         or confess "Invalid table name [$table]";
 
     defined $table_cond and ref $table_cond eq 'HASH'
         or confess "Invalid user condition. " . Dumper($table_cond);
-
-    #  前回の条件をクリア
-    $self->cond({});
-    $self->cond_ref() or $self->cond_ref({}); 
 
 
     for my $col (keys %$table_cond) {
