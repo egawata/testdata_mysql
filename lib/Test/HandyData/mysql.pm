@@ -260,53 +260,13 @@ sub process_table {
             }
 
 
-            #  外部キー制約の有無を確認
-            my $const_key = $constraint->{$key};
-            my ($ref_table, $ref_col);
-            if ( defined $const_key 
-                and $const_key->{REFERENCED_TABLE_SCHEMA} 
-                and $ref_table = $const_key->{REFERENCED_TABLE_NAME} 
-                and $ref_col   = $const_key->{REFERENCED_COLUMN_NAME} ) 
-            {
-                debugf("Column $key is a foreign key references $ref_table.$ref_col.");
-
-                my $ref_ids = $self->cond_ref()->{$table}{$key}{random}
-                                || $self->get_current_ref_keys($ref_table, $ref_col); 
-                
-                if ( $self->cond()->{$table}{$key} ) {
-
-                    #  値の指定がある場合は、その値を持つレコードを必要に応じて参照先に作る
-                    $value = $self->determine_value( $self->cond()->{$table}{$key} );
-                    
-                    if ( ! grep { $_ eq $value } @$ref_ids ) {
-
-                        $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
-                        push @{ $self->cond_ref()->{$table}{$key}{random} }, $value;            #  このIDを追加しておく
-                    }
-
+            #  外部キー制約の有無を確認(fk = 1 のときのみ)
+            if ( $self->fk ) {
+                if ( my $ref = $table_def->is_fk($key) ) {
+                    $value = $self->determine_fk_value($table, $key, $ref);
                 }
-                else {
-
-                    #  値の指定がないので、適当に参照先レコードを作成する
-
-                    #  fk = 1 のときのみ参照先テーブルにレコードを追加する。
-                    if ( $self->fk ) {
-                        my $ref_keys = $self->process_table($ref_table);
-                        $ref_ids = $self->get_current_ref_keys($ref_table, $ref_col);
-                        if ( @$ref_ids ) {
-                            debugf("New ids for referenced table ($ref_table) : " . Dumper($ref_ids));
-                            $self->cond_ref()->{$table}{$key}{random} = [ @$ref_ids ];
-                        }
-                        else {
-                            die "Something is wrong\n";
-                        }
-                    }
-                    else {
-                        #  do nothing
-                    }
-                }
-
             }
+
 
 
             #  列に値決定のルールが設定されていればそれを使う
@@ -333,7 +293,12 @@ sub process_table {
         }
 
         debugf(sprintf( "INSERT INTO %s (%s) VALUES (%s)", $table, (join ',', @colnames), (join ',', @values) ));
-        $sth->execute(@values);
+        eval {
+            $sth->execute(@values);
+        };
+        if ($@) {
+            confess $@
+        }
         
     }
 
@@ -382,6 +347,58 @@ sub determine_value {
     }
 
     return $value;
+}
+
+
+my $fk_count = 0;
+sub determine_fk_value {
+    my ($self, $table, $key, $ref) = @_;
+
+    $fk_count++;
+
+    my $value = undef;
+
+    my $ref_table = $ref->{table};
+    my $ref_col   = $ref->{column};
+
+    debugf("[$fk_count] Column $key is a foreign key references $ref_table.$ref_col.");
+
+    my $ref_ids = $self->get_current_distinct_values($ref_table, $ref_col); 
+    debugf("[$fk_count] ref_ids : " . Dumper($ref_ids));
+    
+    if ( $self->cond()->{$table}{$key} ) {
+
+        #  値の指定がある場合は、まず値を決定する。
+        #  その列値を持つレコードが参照先になければ、参照先にその列値を持つレコードを作成
+        $value = $self->determine_value( $self->cond()->{$table}{$key} );
+        
+        if ( ! grep { $_ eq $value } @$ref_ids ) {  #  なければ作成
+
+            $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
+            push @{ $self->cond_ref()->{$ref_table}{$ref_col} }, $value;            #  このIDを追加しておく
+            debugf("[$fk_count] Referenced record created. id = $value, cond_ref = " . Dumper($self->cond_ref()->{$ref_table}{$ref_col}));
+        }
+
+    }
+    else {
+
+        if ( @$ref_ids ) {
+            #  現存する参照先の値から1つ適当に選ぶ
+            $value = $ref_ids->[ int(rand() * scalar(@$ref_ids)) ];
+
+        }
+        else {
+            #  参照先レコードを適当に作成   
+            $value = $self->process_table($ref_table);
+            $self->cond_ref()->{$table}{$key} ||= [];
+            push @{ $self->cond_ref()->{$ref_table}{$ref_col} }, $value;            #  このIDを追加しておく
+            debugf("[$fk_count] Referenced record created. id = $value");
+            
+        }
+    }
+
+    return $value;
+
 }
 
 
@@ -664,14 +681,31 @@ sub val_datetime {
 }
 
 
-sub get_current_ref_keys {
+
+=pod get_current_distinct_values($table, $col)
+
+$table, $col で指定された表・列の値(distinct値)を一定個数取得する。
+
+
+=cut
+
+sub get_current_distinct_values {
     my ($self, $table, $col) = @_;
 
-    #  現存するレコードを確認
-    my $ref_sql = "SELECT DISTINCT $col FROM $table LIMIT 100";
-    my $ref_res = $self->dbh()->selectall_arrayref($ref_sql);
+    my $current = $self->cond_ref()->{$table}{$col};
 
-    return [ map { $_->[0] } @$ref_res ];
+    if ( !defined $current or @$current == 0 ) {
+
+        #  現存するレコードを確認
+        my $sql = "SELECT DISTINCT $col FROM $table LIMIT 100";
+        my $res = $self->dbh()->selectall_arrayref($sql);
+
+        my @values = map { $_->[0] } @$res;
+
+        $self->cond_ref()->{$table}{$col} = [ @values ];
+    }
+
+    return $self->cond_ref()->{$table}{$col};
 }
 
 

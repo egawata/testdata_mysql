@@ -132,6 +132,22 @@ sub is_pk {
 }
 
 
+sub is_fk {
+    my ($self, $colname) = @_;
+
+    my $const_key = $self->constraint()->{$colname};
+
+    if ( $const_key  
+         and $const_key->{REFERENCED_TABLE_SCHEMA}
+         and my $ref_table = $const_key->{REFERENCED_TABLE_NAME}
+         and my $ref_col   = $const_key->{REFERENCED_COLUMN_NAME} ) {
+        return { table => $ref_table, column => $ref_col };
+    }
+    else {
+        return undef;
+    }
+}
+
 =head2 pk_columns()
 
 Gets column names of primary keys
