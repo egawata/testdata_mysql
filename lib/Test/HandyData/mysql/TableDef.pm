@@ -132,6 +132,20 @@ sub is_pk {
 }
 
 
+=head2 is_fk($colname)
+
+If $colname is a foreign key, returns referenced table/column name like this:
+
+    $ret = {
+        table   => 'table name',
+        column  => 'column name'
+    }
+
+Otherwise, returns undef.
+
+
+=cut
+
 sub is_fk {
     my ($self, $colname) = @_;
 
@@ -147,6 +161,7 @@ sub is_fk {
         return undef;
     }
 }
+
 
 =head2 pk_columns()
 

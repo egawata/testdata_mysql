@@ -17,18 +17,17 @@ use Class::Accessor::Lite (
         'dbh',          #  Database handle
         'fk',           #  1: Creates record on other table referenced by main table
         'nonull',       #  1: Assigns values to columns even if those default is NULL.      
-        'cond_ref',     #  Special conditions for referenced tables.
+        'distinct_val', #  distinct values for each tables/columns 
+                        #     $self->{distinct_val}{$table}{$column} = {
+                        #       'value1'    => 1,
+                        #       'value2'    => 1,
+                        #     }
     ],
     ro      => [
         'inserted',     #  All inserted ids
 
         'defs',         #  Table definitions
-                        #    $self->defs->{ $table_name }{ $column_name } = {
-                        #       COLUMN_NAME     => $column_name,
-                        #       ...
-                        #    }
-                        
-        'constraints',  #  Table constraints
+                        #    $self->defs->{ $table_name } = (Test::HandyData::mysql::TableDef object)
     ],
 );
 
@@ -271,7 +270,7 @@ sub process_table {
 
             #  列に値決定のルールが設定されていればそれを使う
             if ( !defined($value) ) {
-                for ( $self->cond(), $self->cond_ref() ) {
+                for ( $self->cond(), $self->distinct_val() ) {
                     $value = $self->determine_value( $_->{$table}{$key} );
                     defined($value) and last;
                 }
@@ -372,26 +371,26 @@ sub determine_fk_value {
         #  その列値を持つレコードが参照先になければ、参照先にその列値を持つレコードを作成
         $value = $self->determine_value( $self->cond()->{$table}{$key} );
         
-        if ( ! grep { $_ eq $value } @$ref_ids ) {  #  なければ作成
+        if ( ! $ref_ids->{$value} ) {  #  なければ作成
 
             $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
-            push @{ $self->cond_ref()->{$ref_table}{$ref_col} }, $value;            #  このIDを追加しておく
-            debugf("[$fk_count] Referenced record created. id = $value, cond_ref = " . Dumper($self->cond_ref()->{$ref_table}{$ref_col}));
+            $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
+            debugf("[$fk_count] Referenced record created. id = $value, distinct_val = " . Dumper($self->distinct_val()->{$ref_table}{$ref_col}));
         }
 
     }
     else {
-
-        if ( @$ref_ids ) {
+        my @_ref_ids = %$ref_ids;
+        if ( @_ref_ids ) {
             #  現存する参照先の値から1つ適当に選ぶ
-            $value = $ref_ids->[ int(rand() * scalar(@$ref_ids)) ];
+            $value = $ref_ids->[ int(rand() * scalar(@$ref_ids)) * 2 ];
 
         }
         else {
             #  参照先レコードを適当に作成   
             $value = $self->process_table($ref_table);
-            $self->cond_ref()->{$table}{$key} ||= [];
-            push @{ $self->cond_ref()->{$ref_table}{$ref_col} }, $value;            #  このIDを追加しておく
+            $self->distinct_val()->{$table}{$key} ||= [];
+            $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
             debugf("[$fk_count] Referenced record created. id = $value");
             
         }
@@ -692,20 +691,20 @@ $table, $col で指定された表・列の値(distinct値)を一定個数取得
 sub get_current_distinct_values {
     my ($self, $table, $col) = @_;
 
-    my $current = $self->cond_ref()->{$table}{$col};
+    my $current = $self->distinct_val()->{$table}{$col};
 
-    if ( !defined $current or @$current == 0 ) {
+    if ( !defined $current or keys %$current == 0 ) {
 
         #  現存するレコードを確認
-        my $sql = "SELECT DISTINCT $col FROM $table LIMIT 100";
+        my $sql = "SELECT DISTINCT $col FROM $table LIMIT 10000";
         my $res = $self->dbh()->selectall_arrayref($sql);
 
-        my @values = map { $_->[0] } @$res;
+        my %values = map { $_->[0] => 1 } @$res;
 
-        $self->cond_ref()->{$table}{$col} = [ @values ];
+        $self->distinct_val()->{$table}{$col} = { %values };
     }
 
-    return $self->cond_ref()->{$table}{$col};
+    return $self->distinct_val()->{$table}{$col};
 }
 
 
@@ -734,7 +733,7 @@ sub set_user_cond {
 
     #  前回の条件をクリア
     $self->cond({});
-    $self->cond_ref() or $self->cond_ref({}); 
+    $self->distinct_val() or $self->distinct_val({}); 
 
     $self->add_user_cond($table, $table_cond);
 }
