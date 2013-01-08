@@ -363,7 +363,7 @@ sub determine_fk_value {
     debugf("[$fk_count] Column $key is a foreign key references $ref_table.$ref_col.");
 
     my $ref_ids = $self->get_current_distinct_values($ref_table, $ref_col); 
-    debugf("[$fk_count] ref_ids : " . Dumper($ref_ids));
+    #debugf("[$fk_count] ref_ids : " . Dumper($ref_ids));
     
     if ( $self->cond()->{$table}{$key} ) {
 
@@ -375,7 +375,7 @@ sub determine_fk_value {
 
             $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
             $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
-            debugf("[$fk_count] Referenced record created. id = $value, distinct_val = " . Dumper($self->distinct_val()->{$ref_table}{$ref_col}));
+            debugf("[$fk_count] Referenced record created. id = $value");
         }
 
     }
@@ -383,7 +383,8 @@ sub determine_fk_value {
         my @_ref_ids = %$ref_ids;
         if ( @_ref_ids ) {
             #  現存する参照先の値から1つ適当に選ぶ
-            $value = $ref_ids->[ int(rand() * scalar(@$ref_ids)) * 2 ];
+            $value = $_ref_ids[ int(rand() * ( scalar(@_ref_ids) / 2 )) * 2 ];
+            debugf("[$fk_count] Referenced record id = $value");
 
         }
         else {
