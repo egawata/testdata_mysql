@@ -789,7 +789,7 @@ sub add_user_cond {
 sub get_auto_increment_value {
     my ($self, $table_def) = @_;
 
-    return $table_def->get_auto_increment_value();
+    return $table_def->get_auto_increment_value() + 1;
 }
 
 
