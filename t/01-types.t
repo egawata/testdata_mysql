@@ -26,8 +26,8 @@ sub main {
     
     $dbh->do("CREATE TABLE table_int (val integer)");
 
-    my $datagen = Test::HandyData::mysql->new(dbh => $dbh);
-    my $desc = $datagen->get_table_definition('table_int');
+    my $hd = Test::HandyData::mysql->new(dbh => $dbh);
+    my $desc = $hd->table_def('table_int')->def;
 
     is(keys %$desc, 1, 'table_int: num of columns');
     is($desc->{val}{DATA_TYPE} , 'int', 'table_int: type of column');

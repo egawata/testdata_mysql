@@ -452,13 +452,6 @@ sub get_id {
 }
 
 
-sub _is_auto_increment {
-    my ($self, $table, $col) = @_;
-
-    return
-        ( $self->get_table_definition()->{$table}{$col}{EXTRA} =~ /auto_increment/ ) ? 1 : 0 ;
-}
-
 
 #  INSERT 実行時に値を指定する必要のある列のみ抽出する
 sub get_cols_requiring_value {
@@ -516,64 +509,6 @@ sub table_def {
     return $self->{_table_def}{$table};
 }
 
-
-#
-#  指定されたテーブルのテーブル定義を取得する。
-#  結果は
-#  　$res = {
-#      (colname1) => (information_schema のレコード),
-#      (colname2) => (  同上 ),
-#      ..
-#    }
-#  のような形式で返す。 
-#
-sub get_table_definition {
-    my ($self, $table) = @_;
-
-    $self->{defs} ||= {};
-
-    unless ( $self->defs->{$table} ) {
-
-        my $sql = "SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?";
-        my $sth = $self->dbh()->prepare($sql);
-        $sth->bind_param(1, $self->dbname);
-        $sth->bind_param(2, $table);
-        $sth->execute();
-        my $res = {};
-        while ( my $ref = $sth->fetchrow_hashref ) {
-
-            #  取得された information_schema 結果のキーは環境により大文字、小文字の両方がありえるので、
-            #  キー名はすべて大文字に変換する。
-            my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
-
-            my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
-            $res->{$column_name} = $ref_uc;
-        } 
-
-        $self->defs->{$table} = { %$res };
-    }
-
-    return $self->defs->{$table};
-}
-
-
-sub get_constraint {
-    my ($self, $table) = @_;
-
-    my $sql = "SELECT * FROM information_schema.key_column_usage where table_schema = ? AND table_name = ?";
-    my $sth = $self->dbh()->prepare($sql);
-    $sth->bind_param(1, $self->dbname);
-    $sth->bind_param(2, $table);
-    $sth->execute();
-    my $res = {};
-    while ( my $ref = $sth->fetchrow_hashref ) {
-        my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
-        my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
-        $res->{$column_name} = $ref_uc;
-    }
-    
-    return $res;  
-}
 
 
 sub _make_insert_sql {
