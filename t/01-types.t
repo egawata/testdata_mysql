@@ -3,9 +3,14 @@
 use strict;
 use warnings;
 
-use Test::More tests => 2;
+use Test::More;
 use DBI;
-use Test::mysqld;
+
+eval "use Test::mysqld";
+plan skip_all => "Test::mysqld is needed for test" if $@;
+
+plan tests => 2;
+
 
 use Test::HandyData::mysql;
 
@@ -33,4 +38,9 @@ sub main {
     is($desc->{val}{DATA_TYPE} , 'int', 'table_int: type of column');
 }
 
+
+__END__
+
+types.t
+Check if correct column type names can be retrieved.
 

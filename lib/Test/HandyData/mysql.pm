@@ -227,20 +227,21 @@ sub process_table {
     $table_cond 
         and $self->add_user_cond($table, $table_cond);
 
-    #my $def = $self->get_table_definition($table);
-    #my $constraint = $self->get_constraint($table);
     my $table_def = $self->table_def($table);
     my $def = $table_def->def;
     my $constraint = $table_def->constraint;
     debugf("Current constraint : " .  Dumper($constraint));
 
     #  ID 列の決定
+    #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
+    #  $real_id : 実際に割り当てられたID。ユーザ指定があればその値になるが、auto_increment の場合は undef
     my ($exp_id, $real_id) = $self->get_id($table);
     debugf("ID is ($exp_id, $real_id)");
 
     
-    #  値を指定する必要のある列のみ抽出する
+    #  値を指定する必要のある列を抽出する
     my @colnames = $self->get_cols_requiring_value($table, $def);
+
 
     my $sql = $self->_make_insert_sql($table, \@colnames);
     my $sth = $dbh->prepare($sql);
@@ -252,6 +253,8 @@ sub process_table {
 
             my $value;
 
+
+            #  PK、かつ値の指定が明示的にされている場合は、それを使う。
             if ( $table_def->is_pk($key) and $real_id ) {
                 debugf("Value of primary key : $real_id");
                 push @values, $real_id;
@@ -260,6 +263,7 @@ sub process_table {
 
 
             #  外部キー制約の有無を確認(fk = 1 のときのみ)
+            #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
             if ( $self->fk ) {
                 if ( my $ref = $table_def->is_fk($key) ) {
                     $value = $self->determine_fk_value($table, $key, $ref);
@@ -269,6 +273,7 @@ sub process_table {
 
 
             #  列に値決定のルールが設定されていればそれを使う
+            #  XXX: distinct_val は使用すべきではないかも。(特にunique制約がある列では)
             if ( !defined($value) ) {
                 for ( $self->cond(), $self->distinct_val() ) {
                     $value = $self->determine_value( $_->{$table}{$key} );
@@ -279,12 +284,14 @@ sub process_table {
 
             #  ルールが設定されていなければ、ランダムに値を決定する
             if ( !defined($value) ) {
-                my $col_def = $table_def->column_def($key) or confess "No column def found. $key";
+
+                my $col_def = $table_def->column_def($key) 
+                    or confess "No column def found. $key";
+
                 my $type = $col_def->data_type;
                 my $func = $VALUE_DEF_FUNC{$type}
-                    or die "Type $type for $key not supported". Dumper($def);
+                    or die "Type $type for $key not supported";
                 
-                #$value = $func->($size, $opt, $def->{$key});
                 $value = $self->$func($col_def, $exp_id);
             }
 
@@ -349,50 +356,56 @@ sub determine_value {
 }
 
 
-my $fk_count = 0;
 sub determine_fk_value {
     my ($self, $table, $key, $ref) = @_;
-
-    $fk_count++;
 
     my $value = undef;
 
     my $ref_table = $ref->{table};
     my $ref_col   = $ref->{column};
 
-    debugf("[$fk_count] Column $key is a foreign key references $ref_table.$ref_col.");
+    debugf("Column $key is a foreign key references $ref_table.$ref_col.");
 
+    #  現在参照先テーブルにあるPK値を取得する
+    #  結果は 
+    #  $ref_ids => { (id1)  => 1, (id2) => 1, ... }  という形で取得される。
     my $ref_ids = $self->get_current_distinct_values($ref_table, $ref_col); 
-    #debugf("[$fk_count] ref_ids : " . Dumper($ref_ids));
     
     if ( $self->cond()->{$table}{$key} ) {
 
-        #  値の指定がある場合は、まず値を決定する。
-        #  その列値を持つレコードが参照先になければ、参照先にその列値を持つレコードを作成
+        # 
+        #  (1)値の決定方法に指定がある場合は、その方法により値を決定する。
+        #
+
         $value = $self->determine_value( $self->cond()->{$table}{$key} );
         
-        if ( ! $ref_ids->{$value} ) {  #  なければ作成
-
+        #  その値を持つレコードが参照先テーブルになければ、参照先にその値を持つレコードを新たに作成
+        if ( ! $ref_ids->{$value} ) {
             $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
             $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
-            debugf("[$fk_count] Referenced record created. id = $value");
+            debugf("Referenced record created. id = $value");
         }
 
     }
     else {
-        my @_ref_ids = %$ref_ids;
+
+        #
+        #  (2)値の決定方法にユーザ指定がない場合
+        #
+
+        #  現存する参照先の値から1つ適当に選ぶ(1レコード以上ある場合)
+        my @_ref_ids = keys %$ref_ids;
         if ( @_ref_ids ) {
-            #  現存する参照先の値から1つ適当に選ぶ
-            $value = $_ref_ids[ int(rand() * ( scalar(@_ref_ids) / 2 )) * 2 ];
-            debugf("[$fk_count] Referenced record id = $value");
+            $value = $_ref_ids[ int(rand() * scalar(@_ref_ids)) ];
+            debugf("Referenced record id = $value");
 
         }
         else {
-            #  参照先レコードを適当に作成   
-            $value = $self->process_table($ref_table);
+            #  参照先にはまだレコードがないので、適当に作成   
+            $value = $self->process_table($ref_table);      #  IDを指定していないので適当な値がIDになるはず
             $self->distinct_val()->{$table}{$key} ||= [];
             $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
-            debugf("[$fk_count] Referenced record created. id = $value");
+            debugf("Referenced record created. id = $value");
             
         }
     }
@@ -431,7 +444,7 @@ sub get_id {
             debugf("user value is not specified");
             if ( $col_def->is_auto_increment() ) {
                 debugf("Column $col is an auto_increment");
-                $exp_id = $self->get_auto_increment_value($table_def);
+                $exp_id = $self->$table_def->get_auto_increment_value();
                 
                 #  real_id は insert 時に決まるため、undef のままにしておく。
 
@@ -502,8 +515,6 @@ sub dbname {
 
 sub table_def {
     my ($self, $table) = @_;
-
-    $self->{_table_def} ||= {};
 
     $self->{_table_def}{$table} ||= Test::HandyData::mysql::TableDef->new( $self->dbh, $table );
 
@@ -637,28 +648,16 @@ sub get_current_distinct_values {
 
         my %values = map { $_->[0] => 1 } @$res;
 
-        $self->distinct_val()->{$table}{$col} = { %values };
+        $current = $self->distinct_val()->{$table}{$col} = { %values };
     }
 
-    return $self->distinct_val()->{$table}{$col};
-}
-
-
-=pod parse_table_cond
-
-(deprecated) 以降は set_user_cond を使うこと
-=cut
-
-sub parse_table_cond {
-    my ($self, $table, $table_cond) = @_;
-
-    $self->set_user_cond($table, $table_cond);
+    return $current;
 }
 
 
 =pod set_user_cond($table_name, $cond)
 
-次回 insert を実行したときの条件を設定する。
+insert を実行するときの条件を設定する。
 (これまで設定していた条件はクリアされる)
 
 
