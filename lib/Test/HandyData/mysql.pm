@@ -227,10 +227,8 @@ sub process_table {
     $table_cond 
         and $self->add_user_cond($table, $table_cond);
 
+
     my $table_def = $self->table_def($table);
-    my $def = $table_def->def;
-    my $constraint = $table_def->constraint;
-    #debugf("Current constraint : " .  Dumper($constraint));
 
     #  ID 列の決定
     #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
@@ -240,7 +238,7 @@ sub process_table {
 
     
     #  値を指定する必要のある列を抽出する
-    my @colnames = $self->get_cols_requiring_value($table, $def);
+    my @colnames = $self->get_cols_requiring_value($table, $table_def->def);
 
 
     my $sql = $self->_make_insert_sql($table, \@colnames);
@@ -249,14 +247,13 @@ sub process_table {
     {
         my @values = ();
 
-        for my $key (@colnames) {
+        for my $col (@colnames) {
 
             my $value;
 
 
             #  PK、かつ値の指定が明示的にされている場合は、それを使う。
-            if ( $table_def->is_pk($key) and $real_id ) {
-                debugf("Value of primary key : $real_id");
+            if ( $table_def->is_pk($col) and $real_id ) {
                 push @values, $real_id;
                 next;
             }
@@ -265,32 +262,35 @@ sub process_table {
             #  外部キー制約の有無を確認(fk = 1 のときのみ)
             #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
             if ( $self->fk ) {
-                if ( my $ref = $table_def->is_fk($key) ) {
-                    $value = $self->determine_fk_value($table, $key, $ref);
+                if ( my $referenced_table_col = $table_def->is_fk($col) ) {     #  ret = { table => 'table name, column => 'column name' }
+                    $value = $self->determine_fk_value($table, $col, $referenced_table_col);
                 }
             }
 
 
 
             #  列に値決定のルールが設定されていればそれを使う
-            #  XXX: distinct_val は使用すべきではないかも。(特にunique制約がある列では)
             if ( !defined($value) ) {
-                for ( $self->cond(), $self->distinct_val() ) {
-                    $value = $self->determine_value( $_->{$table}{$key} );
-                    defined($value) and last;
-                }
+
+                # XXX: distinct_val は使用すべきではないかも。(特にunique制約がある列では)
+                # for ( $self->cond(), $self->distinct_val() ) {
+                #     $value = $self->determine_value( $_->{$table}{$col} );
+                #     defined($value) and last;
+                # }
+
+                $value = $self->determine_value( $self->cond()->{$table}{$col} );
             }
             
 
             #  ルールが設定されていなければ、ランダムに値を決定する
             if ( !defined($value) ) {
 
-                my $col_def = $table_def->column_def($key) 
-                    or confess "No column def found. $key";
+                my $col_def = $table_def->column_def($col) 
+                    or confess "No column def found. $col";
 
                 my $type = $col_def->data_type;
                 my $func = $VALUE_DEF_FUNC{$type}
-                    or die "Type $type for $key not supported";
+                    or die "Type $type for $col not supported";
                 
                 $value = $self->$func($col_def, $exp_id);
             }
