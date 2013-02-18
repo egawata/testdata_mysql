@@ -230,7 +230,7 @@ sub process_table {
     my $table_def = $self->table_def($table);
     my $def = $table_def->def;
     my $constraint = $table_def->constraint;
-    debugf("Current constraint : " .  Dumper($constraint));
+    #debugf("Current constraint : " .  Dumper($constraint));
 
     #  ID 列の決定
     #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
@@ -333,6 +333,9 @@ sub cond {
 sub add_inserted_id {
     my ($self, $table, $id) = @_;
 
+    $self->{inserted}{$table}->[-1] == $id
+        and confess "Same ID inserted. table = $table, ID = $id";
+
     $self->{inserted}{$table} ||= [];
     push @{ $self->{inserted}{$table} }, $id;
 }
@@ -370,6 +373,8 @@ sub determine_fk_value {
     #  結果は 
     #  $ref_ids => { (id1)  => 1, (id2) => 1, ... }  という形で取得される。
     my $ref_ids = $self->get_current_distinct_values($ref_table, $ref_col); 
+    #debugf "Current ref ids are ";
+    #debugf(join ',', sort keys %$ref_ids);
     
     if ( $self->cond()->{$table}{$key} ) {
 
@@ -422,12 +427,12 @@ sub get_id {
 
     my $table_def = $self->table_def($table);
     my $pks = $table_def->pk_columns();
-    debugf("Table Cond: " . Dumper($self->cond()->{$table}));
+    #debugf("Table Cond: " . Dumper($self->cond()->{$table}));
 
     my ($exp_id, $real_id);
     for my $col (@$pks) {
-        debugf("key_column: $table.$col");
-        debugf("Cond: " . Dumper($self->cond()->{$table}{$col}));
+        #debugf("key_column: $table.$col");
+        #debugf("Cond: " . Dumper($self->cond()->{$table}{$col}));
 
         my $col_def = $table_def->column_def($col);
         
@@ -444,7 +449,7 @@ sub get_id {
             debugf("user value is not specified");
             if ( $col_def->is_auto_increment() ) {
                 debugf("Column $col is an auto_increment");
-                $exp_id = $self->$table_def->get_auto_increment_value();
+                $exp_id = $table_def->get_auto_increment_value();
                 
                 #  real_id は insert 時に決まるため、undef のままにしておく。
 
@@ -638,18 +643,21 @@ $table, $col で指定された表・列の値(distinct値)を一定個数取得
 sub get_current_distinct_values {
     my ($self, $table, $col) = @_;
 
-    my $current = $self->distinct_val()->{$table}{$col};
+    #debugf("get_current_distinct_values. table = $table, col = $col");
 
-    if ( !defined $current or keys %$current == 0 ) {
+    my $current = $self->distinct_val()->{$table}{$col};
+    #debugf("current distinct_val is " . (join ',', sort keys %$current));
+
+    #if ( !defined $current or keys %$current == 0 ) {
 
         #  現存するレコードを確認
-        my $sql = "SELECT DISTINCT $col FROM $table LIMIT 10000";
+        my $sql = "SELECT DISTINCT $col FROM $table";
         my $res = $self->dbh()->selectall_arrayref($sql);
 
         my %values = map { $_->[0] => 1 } @$res;
 
         $current = $self->distinct_val()->{$table}{$col} = { %values };
-    }
+    #}
 
     return $current;
 }
@@ -715,7 +723,7 @@ sub add_user_cond {
         }
     }
 
-    debugf("result cond : " . Dumper($self->cond()));
+    #debugf("result cond : " . Dumper($self->cond()));
 }   
 
 
@@ -726,6 +734,26 @@ sub get_auto_increment_value {
     return $table_def->get_auto_increment_value();
 }
 
+
+sub delete_all {
+    my ($self) = @_;
+
+    my $dbh = $self->dbh();
+
+    $dbh->do('SET FOREIGN_KEY_CHECKS = 0');
+
+    for my $table ( keys %{ $self->inserted() } ) {
+        my $pk_name = $self->table_def($table)->pk_columns()->[0];
+        my $sth = $dbh->prepare( qq{DELETE FROM $table WHERE $pk_name = ?} );
+        for my $val ( @{ $self->inserted->{$table} } ) {
+            $sth->execute($val);
+            debugf("DELETE FROM $table WHERE $pk_name = $val");
+        }
+    }
+
+    $dbh->do('SET FOREIGN_KEY_CHECKS = 1');
+
+}
 
 
 1;
