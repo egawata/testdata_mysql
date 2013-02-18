@@ -17,7 +17,7 @@ use Class::Accessor::Lite (
         'dbh',          #  Database handle
         'fk',           #  1: Creates record on other table referenced by main table
         'nonull',       #  1: Assigns values to columns even if those default is NULL.      
-        'distinct_val', #  distinct values for each tables/columns 
+        'distinct_val', #  distinct values for each referenced tables/columns
                         #     $self->{distinct_val}{$table}{$column} = {
                         #       'value1'    => 1,
                         #       'value2'    => 1,
@@ -69,6 +69,8 @@ my %VALUE_DEF_FUNC = (
     timestamp   => \&val_datetime,
     date        => \&val_datetime,
 );
+
+my $DISTINCT_VAL_FETCH_LIMIT = 100;
 
 
 =head1 NAME
@@ -252,14 +254,14 @@ sub process_table {
             my $value;
 
 
-            #  PK、かつ値の指定が明示的にされている場合は、それを使う。
+            #  (1)PK、かつ値の指定が明示的にされている場合は、それを使う。
             if ( $table_def->is_pk($col) and $real_id ) {
                 push @values, $real_id;
                 next;
             }
 
 
-            #  外部キー制約の有無を確認(fk = 1 のときのみ)
+            #  (2)外部キー制約の有無を確認(fk = 1 のときのみ)
             #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
             if ( $self->fk ) {
                 if ( my $referenced_table_col = $table_def->is_fk($col) ) {     #  ret = { table => 'table name, column => 'column name' }
@@ -268,21 +270,13 @@ sub process_table {
             }
 
 
-
-            #  列に値決定のルールが設定されていればそれを使う
+            #  (3)列に値決定のルールが設定されていればそれを使う
             if ( !defined($value) ) {
-
-                # XXX: distinct_val は使用すべきではないかも。(特にunique制約がある列では)
-                # for ( $self->cond(), $self->distinct_val() ) {
-                #     $value = $self->determine_value( $_->{$table}{$col} );
-                #     defined($value) and last;
-                # }
-
                 $value = $self->determine_value( $self->cond()->{$table}{$col} );
             }
             
 
-            #  ルールが設定されていなければ、ランダムに値を決定する
+            #  (4)ルールが設定されていなければ、ランダムに値を決定する
             if ( !defined($value) ) {
 
                 my $col_def = $table_def->column_def($col) 
@@ -322,8 +316,14 @@ sub process_table {
 sub cond {
     my ($self, $_cond) = @_;
 
-    defined $_cond and ref $_cond eq 'HASH'
-        and $self->{_cond} = $_cond;
+    if ( defined $_cond ) {
+        if ( ref $_cond eq 'HASH' ) {
+            $self->{_cond} = $_cond;
+        }
+        else {
+            confess "Invalid condition specified.";
+        }
+    }
 
     return $self->{_cond} || {};
 }
@@ -333,29 +333,60 @@ sub cond {
 sub add_inserted_id {
     my ($self, $table, $id) = @_;
 
-    $self->{inserted}{$table}->[-1] == $id
-        and confess "Same ID inserted. table = $table, ID = $id";
+    $table or confess "Missing table name";
+    defined $id or confess "Missing ID. table = $table";
 
     $self->{inserted}{$table} ||= [];
     push @{ $self->{inserted}{$table} }, $id;
 }
 
 
+
 #  ルールにしたがって列値を決定する
 sub determine_value {
     my ($self, $cond_key) = @_;
 
+    ref $cond_key eq 'HASH'
+        or confess "Invalid condition type.";
+
     my $value;
 
-    if ( defined($cond_key->{random}) ) {
-        my $ind = rand() * @{ $cond_key->{random} };
-        $value = $cond_key->{random}[$ind]; 
+    if ( exists($cond_key->{random}) ) {
+        my $values = $cond_key->{random};
+
+        ref $values eq 'ARRAY'
+            or confess "Value of 'random' is invalid. type = " . (ref $values);
+        scalar(@$values) > 0
+            or confess "Value of 'random' is an empty arrayref";
+
+        my $ind = rand() * scalar(@$values);
+        $value = $values->[$ind]; 
+
     }
     elsif ( exists($cond_key->{fixval}) ) {
-        $value = $cond_key->{fixval};
+        my $fixval = $cond_key->{fixval};
+        ref $fixval eq ''
+            or confess "Value of 'fixval' is invalid";
+
+        $value = $fixval;
     }
 
     return $value;
+}
+
+
+#  特定テーブルの中に、特定の列値を持つレコードがあるか調べる。
+#  戻り値は件数。
+sub _value_exists_in_table_col {
+    my ($self, $table, $col, $value) = @_;
+
+    my $sth = $self->dbh()->prepare(qq{
+        SELECT count(*) FROM $table WHERE $col = ?
+    });
+    $sth->execute($value);
+    my $row = $sth->fetchrow_arrayref();
+
+    return $row->[0];       #  count(*)
 }
 
 
@@ -369,13 +400,6 @@ sub determine_fk_value {
 
     debugf("Column $key is a foreign key references $ref_table.$ref_col.");
 
-    #  現在参照先テーブルにあるPK値を取得する
-    #  結果は 
-    #  $ref_ids => { (id1)  => 1, (id2) => 1, ... }  という形で取得される。
-    my $ref_ids = $self->get_current_distinct_values($ref_table, $ref_col); 
-    #debugf "Current ref ids are ";
-    #debugf(join ',', sort keys %$ref_ids);
-    
     if ( $self->cond()->{$table}{$key} ) {
 
         # 
@@ -383,11 +407,16 @@ sub determine_fk_value {
         #
 
         $value = $self->determine_value( $self->cond()->{$table}{$key} );
-        
+       
+
         #  その値を持つレコードが参照先テーブルになければ、参照先にその値を持つレコードを新たに作成
-        if ( ! $ref_ids->{$value} ) {
+        #  
+        #  参照先テーブルの内容を毎回問い合わせるのは効率が悪いと考えたが、
+        #  参照先のレコード数が大量の場合はメモリを浪費してしまうことも考慮し、
+        #  あえて毎回問い合わせることにした。
+
+        if ( 0 == $self->_value_exists_in_table_col($ref_table, $ref_col, $value) ) {     #  No record exist
             $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
-            $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
             debugf("Referenced record created. id = $value");
         }
 
@@ -397,6 +426,12 @@ sub determine_fk_value {
         #
         #  (2)値の決定方法にユーザ指定がない場合
         #
+
+        #  現在参照先テーブルにあるPK値を取得する
+        #  結果は 
+        #  $ref_ids => { (id1)  => 1, (id2) => 1, ... }  という形で取得される。
+        my $ref_ids = $self->get_current_distinct_values($ref_table, $ref_col); 
+    
 
         #  現存する参照先の値から1つ適当に選ぶ(1レコード以上ある場合)
         my @_ref_ids = keys %$ref_ids;
@@ -408,7 +443,6 @@ sub determine_fk_value {
         else {
             #  参照先にはまだレコードがないので、適当に作成   
             $value = $self->process_table($ref_table);      #  IDを指定していないので適当な値がIDになるはず
-            $self->distinct_val()->{$table}{$key} ||= [];
             $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
             debugf("Referenced record created. id = $value");
             
@@ -427,12 +461,9 @@ sub get_id {
 
     my $table_def = $self->table_def($table);
     my $pks = $table_def->pk_columns();
-    #debugf("Table Cond: " . Dumper($self->cond()->{$table}));
 
     my ($exp_id, $real_id);
     for my $col (@$pks) {
-        #debugf("key_column: $table.$col");
-        #debugf("Cond: " . Dumper($self->cond()->{$table}{$col}));
 
         my $col_def = $table_def->column_def($col);
         
@@ -648,16 +679,16 @@ sub get_current_distinct_values {
     my $current = $self->distinct_val()->{$table}{$col};
     #debugf("current distinct_val is " . (join ',', sort keys %$current));
 
-    #if ( !defined $current or keys %$current == 0 ) {
+    if ( !defined $current or keys %$current == 0 ) {
 
         #  現存するレコードを確認
-        my $sql = "SELECT DISTINCT $col FROM $table";
+        my $sql = "SELECT DISTINCT $col FROM $table LIMIT $DISTINCT_VAL_FETCH_LIMIT";
         my $res = $self->dbh()->selectall_arrayref($sql);
 
         my %values = map { $_->[0] => 1 } @$res;
 
         $current = $self->distinct_val()->{$table}{$col} = { %values };
-    #}
+    }
 
     return $current;
 }
