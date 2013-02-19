@@ -271,8 +271,8 @@ sub process_table {
 
 
             #  (3)列に値決定のルールが設定されていればそれを使う
-            if ( !defined($value) ) {
-                $value = $self->determine_value( $self->cond()->{$table}{$col} );
+            if ( !defined($value) and my $cond_col = $self->cond()->{$table}{$col} ) {
+                $value = $self->determine_value( $cond_col );
             }
             
 
@@ -347,7 +347,7 @@ sub determine_value {
     my ($self, $cond_key) = @_;
 
     ref $cond_key eq 'HASH'
-        or confess "Invalid condition type.";
+        or confess "Invalid condition type." . Dumper($cond_key);
 
     my $value;
 
@@ -405,9 +405,10 @@ sub determine_fk_value {
         # 
         #  (1)値の決定方法に指定がある場合は、その方法により値を決定する。
         #
-
-        $value = $self->determine_value( $self->cond()->{$table}{$key} );
-       
+    
+        if ( my $cond_key = $self->cond()->{$table}{$key} ) {
+            $value = $self->determine_value( $cond_key );
+        }
 
         #  その値を持つレコードが参照先テーブルになければ、参照先にその値を持つレコードを新たに作成
         #  
