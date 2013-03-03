@@ -5,6 +5,7 @@ use warnings;
 
 use Carp;
 use Data::Dumper;
+use Log::Minimal;
 
 use Test::HandyData::mysql::ColumnDef;
 
@@ -128,7 +129,7 @@ sub is_pk {
     my ($self, $colname) = @_;
 
     return 
-        grep { $_ eq $colname } @{ $self->pk_columns() } ? 1 : 0;
+        ( grep { $_ eq $colname } @{ $self->pk_columns() } ) ? 1 : 0;
 }
 
 
@@ -180,7 +181,7 @@ sub pk_columns {
         }
         $self->{pk_columns} = [ @pk ];
     }
-    
+
     return [ @{ $self->{pk_columns} } ];
 }
 

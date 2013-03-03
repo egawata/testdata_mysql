@@ -236,7 +236,7 @@ sub process_table {
     #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
     #  $real_id : 実際に割り当てられたID。ユーザ指定があればその値になるが、auto_increment の場合は undef
     my ($exp_id, $real_id) = $self->get_id($table, $tmpl_valspec);
-
+    debugf("id is ($exp_id, " . ($real_id || '(undef)') . ")");
     
     #  値を指定する必要のある列を抽出する
     my @colnames = $self->get_cols_requiring_value($table, $table_def->def);
@@ -251,7 +251,7 @@ sub process_table {
         for my $col (@colnames) {
 
             my $value;
-
+        
 
             #  (1)PK、かつ値の指定が明示的にされている場合は、それを使う。
             if ( $table_def->is_pk($col) and $real_id ) {
@@ -286,9 +286,15 @@ sub process_table {
                     or die "Type $type for $col not supported";
                 
                 $value = $self->$func($col_def, $exp_id);
+                debugf("No rule found. Generates random value.($value)");
+
             }
 
             push @values, $value;
+
+            if ( $table_def->is_pk($col) ) {
+                $real_id = $value;
+            }
         }
 
         debugf(sprintf( "INSERT INTO %s (%s) VALUES (%s)", $table, (join ',', @colnames), (join ',', @values) ));
@@ -399,6 +405,9 @@ sub determine_fk_value {
 
     my $ref_table = $ref->{table};
     my $ref_col   = $ref->{column};
+
+    $table and $col and $ref_table and $ref_col 
+        or confess "Invalid args. (requires 3 args)";
 
     debugf("Column $col is a foreign key references $ref_table.$ref_col.");
 
