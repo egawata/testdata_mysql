@@ -168,11 +168,11 @@ creates records on other tables referred by foreign key columns in main table, i
 assigns values to columns even if those defaults are NULL.
 
 
-=head2 insert($table, $cond)
+=head2 insert($table, $valspec)
 
 Inserts a record.
 
-$cond is a hashref which keys are columns' names in $table.
+$valspec is a hashref which keys are columns' names in $table.
 
 
 =item colname => $scalar
@@ -209,10 +209,10 @@ assigns/doesn't assign value to the column even if its default is NULL. (Overrid
 =cut
 
 sub insert {
-    my ($self, $table_name, $table_cond) = @_;
+    my ($self, $table_name, $table_valspec) = @_;
 
-    $table_cond
-        and $self->set_user_cond($table_name, $table_cond);
+    $table_valspec
+        and $self->set_user_valspec($table_name, $table_valspec);
 
     return $self->process_table($table_name);
 }
@@ -222,12 +222,12 @@ sub insert {
 #  1つのテーブルに1レコードを追加する。
 #  戻り値は、INSERT されたレコードの ID。
 sub process_table {
-    my ($self, $table, $table_cond) = @_;
+    my ($self, $table, $tmpl_valspec) = @_;
     my $dbh = $self->dbh();
 
     #  条件の追加指定があればそれを読み込む
-    $table_cond 
-        and $self->add_user_cond($table, $table_cond);
+    $tmpl_valspec 
+        and $self->add_user_valspec($table, $tmpl_valspec);
 
 
     my $table_def = $self->table_def($table);
@@ -235,8 +235,7 @@ sub process_table {
     #  ID 列の決定
     #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
     #  $real_id : 実際に割り当てられたID。ユーザ指定があればその値になるが、auto_increment の場合は undef
-    my ($exp_id, $real_id) = $self->get_id($table);
-    debugf("ID is ($exp_id, $real_id)");
+    my ($exp_id, $real_id) = $self->get_id($table, $tmpl_valspec);
 
     
     #  値を指定する必要のある列を抽出する
@@ -271,8 +270,8 @@ sub process_table {
 
 
             #  (3)列に値決定のルールが設定されていればそれを使う
-            if ( !defined($value) and my $cond_col = $self->cond()->{$table}{$col} ) {
-                $value = $self->determine_value( $cond_col );
+            if ( !defined($value) and my $valspec_col = $self->valspec()->{$table}{$col} ) {
+                $value = $self->determine_value( $valspec_col );
             }
             
 
@@ -313,19 +312,19 @@ sub process_table {
 }
 
 
-sub cond {
-    my ($self, $_cond) = @_;
+sub valspec {
+    my ($self, $_valspec) = @_;
 
-    if ( defined $_cond ) {
-        if ( ref $_cond eq 'HASH' ) {
-            $self->{_cond} = $_cond;
+    if ( defined $_valspec ) {
+        if ( ref $_valspec eq 'HASH' ) {
+            $self->{_valspec} = $_valspec;
         }
         else {
-            confess "Invalid condition specified.";
+            confess "Invalid valspec.";
         }
     }
 
-    return $self->{_cond} || {};
+    return $self->{_valspec} || {};
 }
 
 
@@ -344,15 +343,15 @@ sub add_inserted_id {
 
 #  ルールにしたがって列値を決定する
 sub determine_value {
-    my ($self, $cond_key) = @_;
+    my ($self, $valspec_col) = @_;
 
-    ref $cond_key eq 'HASH'
-        or confess "Invalid condition type." . Dumper($cond_key);
+    ref $valspec_col eq 'HASH'
+        or confess "Invalid valspec type." . Dumper($valspec_col);
 
     my $value;
 
-    if ( exists($cond_key->{random}) ) {
-        my $values = $cond_key->{random};
+    if ( exists($valspec_col->{random}) ) {
+        my $values = $valspec_col->{random};
 
         ref $values eq 'ARRAY'
             or confess "Value of 'random' is invalid. type = " . (ref $values);
@@ -363,8 +362,8 @@ sub determine_value {
         $value = $values->[$ind]; 
 
     }
-    elsif ( exists($cond_key->{fixval}) ) {
-        my $fixval = $cond_key->{fixval};
+    elsif ( exists($valspec_col->{fixval}) ) {
+        my $fixval = $valspec_col->{fixval};
         ref $fixval eq ''
             or confess "Value of 'fixval' is invalid";
 
@@ -391,23 +390,23 @@ sub _value_exists_in_table_col {
 
 
 sub determine_fk_value {
-    my ($self, $table, $key, $ref) = @_;
+    my ($self, $table, $col, $ref) = @_;
 
     my $value = undef;
 
     my $ref_table = $ref->{table};
     my $ref_col   = $ref->{column};
 
-    debugf("Column $key is a foreign key references $ref_table.$ref_col.");
+    debugf("Column $col is a foreign key references $ref_table.$ref_col.");
 
-    if ( $self->cond()->{$table}{$key} ) {
+    if ( $self->valspec()->{$table}{$col} ) {
 
         # 
         #  (1)値の決定方法に指定がある場合は、その方法により値を決定する。
         #
     
-        if ( my $cond_key = $self->cond()->{$table}{$key} ) {
-            $value = $self->determine_value( $cond_key );
+        if ( my $valspec_col = $self->valspec()->{$table}{$col} ) {
+            $value = $self->determine_value( $valspec_col );
         }
 
         #  その値を持つレコードが参照先テーブルになければ、参照先にその値を持つレコードを新たに作成
@@ -416,9 +415,9 @@ sub determine_fk_value {
         #  参照先のレコード数が大量の場合はメモリを浪費してしまうことも考慮し、
         #  あえて毎回問い合わせることにした。
 
-        if ( 0 == $self->_value_exists_in_table_col($ref_table, $ref_col, $value) ) {     #  No record exist
+        if ( 0 == $self->_value_exists_in_table_col($ref_table, $ref_col, $value) ) {     #  No record exists
             $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
-            debugf("Referenced record created. id = $value");
+            debugf("A referenced record created. id = $value");
         }
 
     }
@@ -458,7 +457,7 @@ sub determine_fk_value {
 #  ID 列の値を決定する
 #  TODO: 現状、単一列、整数値にしか対応していない
 sub get_id {
-    my ($self, $table) = @_;
+    my ($self, $table, $tmpl_valspec) = @_;
 
     my $table_def = $self->table_def($table);
     my $pks = $table_def->pk_columns();
@@ -473,7 +472,7 @@ sub get_id {
         #  特に指定がない場合
         #  auto_increment が設定されていればそれに従う
         #  なければランダムな値を生成する。
-        if ( $self->cond()->{$table} and $self->cond()->{$table}{$col} and $real_id = $self->determine_value( $self->cond()->{$table}{$col} ) ) {
+        if ( $self->valspec()->{$table} and $self->valspec()->{$table}{$col} and $real_id = $self->determine_value( $self->valspec()->{$table}{$col} ) ) {
             $exp_id = $real_id;
         }
         else {
@@ -515,7 +514,7 @@ sub get_cols_requiring_value {
 
         #  ユーザから値の指定がある場合は、必ずそれを使って指定する。
         #  なければ、列定義により、指定の要否を決める。
-        unless ( defined( $self->cond()->{$table}{$col} ) ) {
+        unless ( defined( $self->valspec()->{$table}{$col} ) ) {
 
             my $col_def = $table_def->column_def($col);
 
@@ -675,10 +674,7 @@ $table, $col で指定された表・列の値(distinct値)を一定個数取得
 sub get_current_distinct_values {
     my ($self, $table, $col) = @_;
 
-    #debugf("get_current_distinct_values. table = $table, col = $col");
-
     my $current = $self->distinct_val()->{$table}{$col};
-    #debugf("current distinct_val is " . (join ',', sort keys %$current));
 
     if ( !defined $current or keys %$current == 0 ) {
 
@@ -695,7 +691,7 @@ sub get_current_distinct_values {
 }
 
 
-=pod set_user_cond($table_name, $cond)
+=pod set_user_valspec($table_name, $valspec)
 
 insert を実行するときの条件を設定する。
 (これまで設定していた条件はクリアされる)
@@ -703,35 +699,35 @@ insert を実行するときの条件を設定する。
 
 =cut
 
-sub set_user_cond {
-    my ($self, $table, $table_cond) = @_;
+sub set_user_valspec {
+    my ($self, $table, $table_valspec) = @_;
 
     #  前回の条件をクリア
-    $self->cond({});
+    $self->valspec({});
     $self->distinct_val() or $self->distinct_val({}); 
 
-    $self->add_user_cond($table, $table_cond);
+    $self->add_user_valspec($table, $table_valspec);
 }
 
 
-=pod add_user_cond
+=pod add_user_valspec
 
 次回 insert を実行したときの条件を設定する。
 (これまで設定していた条件に追加する)
 
 =cut
 
-sub add_user_cond {
-    my ($self, $table, $table_cond) = @_;
+sub add_user_valspec {
+    my ($self, $table, $table_valspec) = @_;
 
     defined $table and $table =~ /^\w+$/
         or confess "Invalid table name [$table]";
 
-    defined $table_cond and ref $table_cond eq 'HASH'
-        or confess "Invalid user condition. " . Dumper($table_cond);
+    defined $table_valspec and ref $table_valspec eq 'HASH'
+        or confess "Invalid user valspec. " . Dumper($table_valspec);
 
 
-    for my $col (keys %$table_cond) {
+    for my $col (keys %$table_valspec) {
         
         my $_table = $table;
         my $_col   = $col;
@@ -740,22 +736,21 @@ sub add_user_cond {
             ($_table, $_col) = split '\.', $col;
         }
 
-        my $val = $table_cond->{$col};
+        my $val = $table_valspec->{$col};
 
         if ( ref $val eq 'ARRAY' ) {
-            $self->cond()->{$_table}{$_col}{random} = $val;
+            $self->valspec()->{$_table}{$_col}{random} = $val;
         }
         elsif ( ref $val eq 'HASH' ) {
             for (keys %$val) {
-                $self->cond()->{$_table}{$_col}{$_} = $val->{$_};
+                $self->valspec()->{$_table}{$_col}{$_} = $val->{$_};
             }
         }
         elsif ( ref $val eq '' ) {
-            $self->cond()->{$_table}{$_col}{fixval} = $val;
+            $self->valspec()->{$_table}{$_col}{fixval} = $val;
         }
     }
 
-    #debugf("result cond : " . Dumper($self->cond()));
 }   
 
 
