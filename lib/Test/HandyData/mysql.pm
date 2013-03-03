@@ -379,6 +379,9 @@ sub determine_value {
 sub _value_exists_in_table_col {
     my ($self, $table, $col, $value) = @_;
 
+    defined($table) and defined($col) and defined($value)
+         or confess "Invalid args (requires 3 arg)";
+
     my $sth = $self->dbh()->prepare(qq{
         SELECT count(*) FROM $table WHERE $col = ?
     });
