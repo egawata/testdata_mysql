@@ -46,7 +46,7 @@ auto_increment の値に従う
 sub main {
 
     my $mysqld = Test::mysqld->new( my_cnf => { 'skip-networking' => '' } )
-        or die $Test::mysqld::errstr;
+        or plan skip_all => $Test::mysqld::errstr;
 
     my $dbh = DBI->connect(
                 $mysqld->dsn(dbname => 'test')

@@ -4,10 +4,8 @@ use strict;
 use warnings;
 
 use Test::More;
+use Test::mysqld;
 use DBI;
-
-eval "use Test::mysqld";
-plan skip_all => "Test::mysqld is needed for test" if $@;
 
 plan tests => 2;
 
@@ -22,7 +20,7 @@ exit(0);
 sub main {
 
     my $mysqld = Test::mysqld->new( my_cnf => { 'skip-networking' => '' } )
-        or die $Test::mysqld::errstr;
+        or plan skip_all => $Test::mysqld::errstr;
 
     my $dbh = DBI->connect(
                 $mysqld->dsn(dbname => 'test')
@@ -32,10 +30,12 @@ sub main {
     $dbh->do("CREATE TABLE table_int (val integer)");
 
     my $hd = Test::HandyData::mysql->new(dbh => $dbh);
-    my $desc = $hd->table_def('table_int')->def;
+    my $desc = $hd->_table_def('table_int')->def;
 
     is(keys %$desc, 1, 'table_int: num of columns');
     is($desc->{val}{DATA_TYPE} , 'int', 'table_int: type of column');
+
+    $dbh->disconnect();
 }
 
 

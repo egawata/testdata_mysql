@@ -24,11 +24,12 @@ get_cols_requiring_value のテスト
 sub main {
 
     my $mysqld = Test::mysqld->new( my_cnf => { 'skip-networking' => '' } )
-        or die $Test::mysqld::errstr;
+        or plan skip_all => $Test::mysqld::errstr;
 
     my $dbh = DBI->connect(
                 $mysqld->dsn(dbname => 'test')
     ) or die $DBI::errstr;
+    $dbh->{RaiseError} = 1;
 
     test_0($dbh); 
     test_1($dbh);

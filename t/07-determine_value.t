@@ -5,8 +5,6 @@ use warnings;
 
 use Test::More tests => 20;
 use Test::Exception;
-use DBI;
-use Test::mysqld;
 
 use Test::HandyData::mysql;
 

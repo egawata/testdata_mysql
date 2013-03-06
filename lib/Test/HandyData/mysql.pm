@@ -230,7 +230,7 @@ sub process_table {
         and $self->add_user_valspec($table, $tmpl_valspec);
 
 
-    my $table_def = $self->table_def($table);
+    my $table_def = $self->_table_def($table);
 
     #  ID 列の決定
     #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
@@ -467,30 +467,40 @@ sub determine_fk_value {
 
 
 #  ID 列の値を決定する
+#  ここでは exp_id(予測されるID列の値)と real_id(ID列の確定値)の2つを返している。
 #  TODO: 現状、単一列、整数値にしか対応していない
 sub get_id {
-    my ($self, $table, $tmpl_valspec) = @_;
+    my ($self, $table) = @_;
 
-    my $table_def = $self->table_def($table);
+    my $table_def = $self->_table_def($table);
     my $pks = $table_def->pk_columns();
 
     my ($exp_id, $real_id);
-    for my $col (@$pks) {
+    for my $col (@$pks) {   #  for each pk columns
 
         my $col_def = $table_def->column_def($col);
         
 
-        #  呼び出し元から指定された条件があればそれに従う
-        #  特に指定がない場合
-        #  auto_increment が設定されていればそれに従う
-        #  なければランダムな値を生成する。
-        if ( $self->valspec()->{$table} and $self->valspec()->{$table}{$col} and $real_id = $self->determine_value( $self->valspec()->{$table}{$col} ) ) {
+        #  呼び出し元から指定された条件があり、それによりPKの値を決定できるか確かめる。
+        #  決定できる場合は $real_id にその値が入る。
+        if (    $self->valspec()->{$table} 
+                and $self->valspec()->{$table}{$col} 
+                and $real_id = $self->determine_value( $self->valspec()->{$table}{$col} ) 
+        ) 
+        {
+
+            #  呼び出し元から指定された条件があればそれに従う
             $exp_id = $real_id;
+
         }
         else {
 
+            #  特に指定がない場合
             debugf("user value is not specified");
+
             if ( $col_def->is_auto_increment() ) {
+
+                #  auto_increment が設定されていればそれに従う
                 debugf("Column $col is an auto_increment");
                 $exp_id = $table_def->get_auto_increment_value();
                 
@@ -498,6 +508,7 @@ sub get_id {
 
             }
             else {
+                #  なければランダムな値を生成する。
                 debugf("Column $col is not an auto_increment");
                 my $type = $col_def->data_type;
                 my $size = $col_def->character_maximum_length;
@@ -519,7 +530,7 @@ sub get_id {
 sub get_cols_requiring_value {
     my ($self, $table) = @_;
 
-    my $table_def = $self->table_def($table);
+    my $table_def = $self->_table_def($table);
 
     my @cols = ();
     for my $col ( $table_def->colnames ) {
@@ -548,20 +559,7 @@ sub get_cols_requiring_value {
 }
 
 
-sub dbname {
-    my ($self) = @_;
-
-    unless ( $self->{dbname} ) {
-        my $res = $self->dbh()->selectall_arrayref('SELECT DATABASE()');
-        $self->{dbname} = $res->[0]->[0]
-            or confess "Failed to get dbname";
-    }
-    
-    return $self->{dbname}; 
-}
-
-
-sub table_def {
+sub _table_def {
     my ($self, $table) = @_;
 
     $self->{_table_def}{$table} ||= Test::HandyData::mysql::TableDef->new( $self->dbh, $table );
@@ -782,7 +780,7 @@ sub delete_all {
     $dbh->do('SET FOREIGN_KEY_CHECKS = 0');
 
     for my $table ( keys %{ $self->inserted() } ) {
-        my $pk_name = $self->table_def($table)->pk_columns()->[0];
+        my $pk_name = $self->_table_def($table)->pk_columns()->[0];
         my $sth = $dbh->prepare( qq{DELETE FROM $table WHERE $pk_name = ?} );
         for my $val ( @{ $self->inserted->{$table} } ) {
             $sth->execute($val);
