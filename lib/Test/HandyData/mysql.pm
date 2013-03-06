@@ -11,6 +11,7 @@ use Data::Dumper;
 use DateTime;
 use Carp;
 use Log::Minimal;
+use SQL::Maker;
 use Class::Accessor::Lite (
     new     => 1,
     rw      => [
@@ -168,6 +169,16 @@ creates records on other tables referred by foreign key columns in main table, i
 assigns values to columns even if those defaults are NULL.
 
 
+=cut
+
+sub _sql_maker {
+    my ($self) = @_;
+    $self->{_sql_maker} ||= SQL::Maker->new( driver => 'mysql' );
+    return $self->{_sql_maker};
+}
+
+
+
 =head2 insert($table, $valspec)
 
 Inserts a record.
@@ -242,72 +253,68 @@ sub process_table {
     my @colnames = $self->get_cols_requiring_value($table, $table_def->def);
 
 
-    my $sql = $self->_make_insert_sql($table, \@colnames);
-    my $sth = $dbh->prepare($sql);
+    my %values = ();
 
-    {
-        my @values = ();
+    for my $col (@colnames) {
 
-        for my $col (@colnames) {
+        my $value;
+    
+        #  (1)PK、かつ値の指定が明示的にされている場合は、それを使う。
+        if ( $table_def->is_pk($col) and $real_id ) {
+            $values{$col} = $real_id;
+            next;
+        }
 
-            my $value;
+
+        #  (2)外部キー制約の有無を確認(fk = 1 のときのみ)
+        #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
+        if ( $self->fk ) {
+            if ( my $referenced_table_col = $table_def->is_fk($col) ) {     #  ret = { table => 'table name, column => 'column name' }
+                $value = $self->determine_fk_value($table, $col, $referenced_table_col);
+            }
+        }
+
+
+        #  (3)列に値決定のルールが設定されていればそれを使う
+        if ( !defined($value) and my $valspec_col = $self->valspec()->{$table}{$col} ) {
+            $value = $self->determine_value( $valspec_col );
+        }
         
 
-            #  (1)PK、かつ値の指定が明示的にされている場合は、それを使う。
-            if ( $table_def->is_pk($col) and $real_id ) {
-                push @values, $real_id;
-                next;
-            }
+        #  (4)ルールが設定されていなければ、ランダムに値を決定する
+        if ( !defined($value) ) {
 
+            my $col_def = $table_def->column_def($col) 
+                or confess "No column def found. $col";
 
-            #  (2)外部キー制約の有無を確認(fk = 1 のときのみ)
-            #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
-            if ( $self->fk ) {
-                if ( my $referenced_table_col = $table_def->is_fk($col) ) {     #  ret = { table => 'table name, column => 'column name' }
-                    $value = $self->determine_fk_value($table, $col, $referenced_table_col);
-                }
-            }
-
-
-            #  (3)列に値決定のルールが設定されていればそれを使う
-            if ( !defined($value) and my $valspec_col = $self->valspec()->{$table}{$col} ) {
-                $value = $self->determine_value( $valspec_col );
-            }
+            my $type = $col_def->data_type;
+            my $func = $VALUE_DEF_FUNC{$type}
+                or die "Type $type for $col not supported";
             
+            $value = $self->$func($col_def, $exp_id);
+            debugf("No rule found. Generates random value.($value)");
 
-            #  (4)ルールが設定されていなければ、ランダムに値を決定する
-            if ( !defined($value) ) {
-
-                my $col_def = $table_def->column_def($col) 
-                    or confess "No column def found. $col";
-
-                my $type = $col_def->data_type;
-                my $func = $VALUE_DEF_FUNC{$type}
-                    or die "Type $type for $col not supported";
-                
-                $value = $self->$func($col_def, $exp_id);
-                debugf("No rule found. Generates random value.($value)");
-
-            }
-
-            push @values, $value;
-
-            if ( $table_def->is_pk($col) ) {
-                $real_id = $value;
-            }
         }
 
-        debugf(sprintf( "INSERT INTO %s (%s) VALUES (%s)", $table, (join ',', @colnames), (join ',', @values) ));
-        eval {
-            $sth->execute(@values);
-        };
-        if ($@) {
-            confess $@
+        $values{$col} = $value;
+
+        if ( $table_def->is_pk($col) ) {
+            $real_id = $value;
         }
-        
     }
 
-    $sth->finish;
+    eval {
+        my ($sql, @bind) = $self->_sql_maker->insert($table, \%values);
+        debugf($sql, ", binds [" . (join ', ', @bind));
+
+        my $sth = $dbh->prepare($sql);
+        $sth->execute(@bind);
+        $sth->finish;
+    };
+    if ($@) {
+        confess $@
+    }
+        
 
     my $inserted_id = $real_id || $dbh->{'mysql_insertid'};
     $self->add_inserted_id($table, $inserted_id);
@@ -388,10 +395,9 @@ sub _value_exists_in_table_col {
     defined($table) and defined($col) and defined($value)
          or confess "Invalid args (requires 3 arg)";
 
-    my $sth = $self->dbh()->prepare(qq{
-        SELECT count(*) FROM $table WHERE $col = ?
-    });
-    $sth->execute($value);
+    my ($sql, @binds) = $self->_sql_maker->select( $table, [\'count(*)'], { $col => $value } );
+    my $sth = $self->dbh()->prepare($sql);
+    $sth->execute(@binds);
     my $row = $sth->fetchrow_arrayref();
 
     return $row->[0];       #  count(*)
@@ -567,17 +573,6 @@ sub _table_def {
     return $self->{_table_def}{$table};
 }
 
-
-
-sub _make_insert_sql {
-    my ($self, $table_name, $colnames) = @_;
-
-    my $cols = join ',', @$colnames;
-    my $ph   = join ',', ('?') x scalar(@$colnames);
-    my $sql  = "INSERT INTO $table_name ($cols) VALUES ($ph)";
-
-    return $sql;
-}
 
 
 sub val_varchar {
