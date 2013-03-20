@@ -6,6 +6,12 @@ use warnings;
 our $VERSION = '0.0.1';
 
 
+#  precision and scale of float value.
+#  They may be changed from outside this module.
+our $FLOAT_PRECISION = 4;
+our $FLOAT_SCALE     = 2;
+
+
 use DBI;
 use Data::Dumper;
 use DateTime;
@@ -53,22 +59,22 @@ my $MAX_SMALLINT_UNSIGNED    = 65535;
 my $MAX_INT_SIGNED           = 2147483647;
 my $MAX_INT_UNSIGNED         = 4294967295;
 
-my $LENGTH_LIMIT_VARCHAR     = 10;
+my $LENGTH_LIMIT_VARCHAR     = 20;
 
 my %VALUE_DEF_FUNC = (
-    char        => \&val_varchar,
-    varchar     => \&val_varchar,
-    tinyint     => \&val_tinyint,
-    smallint    => \&val_smallint,
-    int         => \&val_int,
-    bigint      => \&val_int,
-    numeric     => \&val_numeric,
-    decimal     => \&val_numeric,
-    float       => \&val_float,
-    double      => \&val_float,
-    datetime    => \&val_datetime,
-    timestamp   => \&val_datetime,
-    date        => \&val_datetime,
+    char        => \&_val_varchar,
+    varchar     => \&_val_varchar,
+    tinyint     => \&_val_tinyint,
+    smallint    => \&_val_smallint,
+    int         => \&_val_int,
+    bigint      => \&_val_int,
+    numeric     => \&_val_numeric,
+    decimal     => \&_val_numeric,
+    float       => \&_val_float,
+    double      => \&_val_float,
+    datetime    => \&_val_datetime,
+    timestamp   => \&_val_datetime,
+    date        => \&_val_datetime,
 );
 
 my $DISTINCT_VAL_FETCH_LIMIT = 100;
@@ -575,23 +581,30 @@ sub _table_def {
 
 
 
-sub val_varchar {
+#  _val_varchar($col_def, $exp_id)
+#
+#  Creates a new varchar value.
+#  
+#  $col_def : ColumnDef object.
+#  $exp_id  : an expected value of primary key.
+#
+sub _val_varchar {
     my ($self, $col_def, $exp_id) = @_;
 
     my $maxlen = $col_def->character_maximum_length;
 
-    my $num_length = length($exp_id);
+    my $pk_length = length($exp_id);
     my $colname = $col_def->name;
     my $colname_length = length($colname);
 
-    if ( $colname_length + $num_length + 1 <= $maxlen ) {       #  (colname)_(num)
+    if ( $colname_length + $pk_length + 1 <= $maxlen ) {       #  (colname)_(num)
         return sprintf("%s_%d", $colname, $exp_id);
     }
-    elsif ( $num_length + 1 <= $maxlen ) {                      #  (part_of_colname)_(num)
-        my $part_of_colname = substr($colname, 0, $maxlen - $num_length - 1);
+    elsif ( $pk_length + 1 <= $maxlen ) {                      #  (part_of_colname)_(num)
+        my $part_of_colname = substr($colname, 0, $maxlen - $pk_length - 1);
         return sprintf("%s_%d", $part_of_colname, $exp_id);
     }
-    elsif ( $num_length == $maxlen ) {
+    elsif ( $pk_length == $maxlen ) {
         return $exp_id;
     }   
     else {                                                      #  random string
@@ -609,7 +622,7 @@ sub val_varchar {
 }
 
 
-sub val_tinyint {
+sub _val_tinyint {
     my ($self, $col_def) = @_;
 
     my $type = $col_def->column_type;
@@ -618,7 +631,7 @@ sub val_tinyint {
 }
 
 
-sub val_smallint {
+sub _val_smallint {
     my ($self, $col_def) = @_;
 
     my $type = $col_def->column_type;
@@ -626,7 +639,7 @@ sub val_smallint {
     return (($type || '') =~ /unsigned/) ? int(rand() * $MAX_SMALLINT_UNSIGNED) : int(rand() * $MAX_SMALLINT_SIGNED);
 }
 
-sub val_int {
+sub _val_int {
     my ($self, $col_def) = @_;
 
     my $type = $col_def->column_type;
@@ -635,36 +648,67 @@ sub val_int {
 }
 
 
-
-sub val_numeric {
-    my ($self, $col_def) = @_;
-
-    my $precision = $col_def->numeric_precision;
-    my $scale     = $col_def->numeric_scale;
-
+sub _make_float {
+    my ($precision, $scale) = @_;
+    
     my $num = '';
     $num .= int(rand() * 10) for 1 .. $precision - $scale;
-    $num .= '.';
-    $num .= int(rand() * 10) for 1 .. $scale;
+    if ( $num =~ /^0+$/ ) {
+        $num = '0'
+    }
+    else {
+        $num =~ s/^0+//; 
+    }
+
+    if ( $scale > 0 ) {
+        $num .= '.';
+        my $frac = '';
+        $frac .= int(rand() * 10) for 1 .. $scale;
+        if ( $frac =~ /^0+$/ ) {
+            $frac = '0';
+        }
+        else {
+            $frac =~ s/0+$//;
+        }
+
+        $num .= $frac;
+    }
 
     return $num;
 }
 
 
-sub val_float {
+sub _val_numeric {
+    my ($self, $col_def) = @_;
+
+    my $precision = $col_def->numeric_precision;
+    my $scale     = $col_def->numeric_scale;
+
+    return _make_float($precision, $scale);
+}
+
+
+sub _val_float {
     my ($self, $col_def) = @_;
 
     my $type = $col_def->column_type;
 
-    return (($type || '') =~ /unsigned/) ? rand() * $MAX_INT_UNSIGNED : rand() * $MAX_INT_SIGNED;
+    return _make_float($FLOAT_PRECISION, $FLOAT_SCALE);
 }
 
 
 
-sub val_datetime {
+sub _val_datetime {
     my ($self, $col_def) = @_;
 
-    return DateTime->from_epoch( epoch => time + rand() * 2 * $ONE_YEAR_SEC - $ONE_YEAR_SEC )->datetime();
+    my $dt = DateTime->from_epoch( epoch => time + rand() * 2 * $ONE_YEAR_SEC - $ONE_YEAR_SEC );
+
+    if ($col_def->{DATA_TYPE} eq 'date') {
+        return $dt->ymd('-');
+    }
+    else {
+        return $dt->ymd('-') . ' ' . $dt->hms(':');
+    }
 }
 
 
