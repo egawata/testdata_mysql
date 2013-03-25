@@ -52,7 +52,7 @@ sub test_with_valspec {
         )
     });
 
-    $hd->set_user_valspec('test_vs', { id => 135 });
+    $hd->_set_user_valspec('test_vs', { id => 135 });
     my ($exp_id, $real_id) = $hd->get_id('test_vs');
     is($exp_id, 135);
     is($real_id, 135);

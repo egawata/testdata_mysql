@@ -24,11 +24,6 @@ use Class::Accessor::Lite (
         'dbh',          #  Database handle
         'fk',           #  1: Creates record on other table referenced by main table
         'nonull',       #  1: Assigns values to columns even if those default is NULL.      
-        'distinct_val', #  distinct values for each referenced tables/columns
-                        #     $self->{distinct_val}{$table}{$column} = {
-                        #       'value1'    => 1,
-                        #       'value2'    => 1,
-                        #     }
     ],
     ro      => [
         'inserted',     #  All inserted ids
@@ -77,7 +72,7 @@ my %VALUE_DEF_FUNC = (
     date        => \&_val_datetime,
 );
 
-my $DISTINCT_VAL_FETCH_LIMIT = 100;
+our $DISTINCT_VAL_FETCH_LIMIT = 100;
 
 
 =head1 NAME
@@ -184,6 +179,19 @@ sub _sql_maker {
 }
 
 
+#  distinct values for each referenced tables/columns
+#     $self->{_distinct_val}{$table}{$column} = {
+#       'value1'    => 1,
+#       'value2'    => 1,
+#     }
+sub _distinct_val {
+    my ($self) = @_;
+
+    $self->{_distinct_val} ||= {};
+
+    return $self->{_distinct_val};
+}
+
 
 =head2 insert($table, $valspec)
 
@@ -229,7 +237,7 @@ sub insert {
     my ($self, $table_name, $table_valspec) = @_;
 
     $table_valspec
-        and $self->set_user_valspec($table_name, $table_valspec);
+        and $self->_set_user_valspec($table_name, $table_valspec);
 
     return $self->process_table($table_name);
 }
@@ -244,7 +252,7 @@ sub process_table {
 
     #  条件の追加指定があればそれを読み込む
     $tmpl_valspec 
-        and $self->add_user_valspec($table, $tmpl_valspec);
+        and $self->_add_user_valspec($table, $tmpl_valspec);
 
 
     my $table_def = $self->_table_def($table);
@@ -282,7 +290,7 @@ sub process_table {
 
 
         #  (3)列に値決定のルールが設定されていればそれを使う
-        if ( !defined($value) and my $valspec_col = $self->valspec()->{$table}{$col} ) {
+        if ( !defined($value) and my $valspec_col = $self->_valspec()->{$table}{$col} ) {
             $value = $self->determine_value( $valspec_col );
         }
         
@@ -331,7 +339,7 @@ sub process_table {
 }
 
 
-sub valspec {
+sub _valspec {
     my ($self, $_valspec) = @_;
 
     if ( defined $_valspec ) {
@@ -343,7 +351,8 @@ sub valspec {
         }
     }
 
-    return $self->{_valspec} || {};
+    $self->{_valspec} ||= {};
+    return $self->{_valspec};
 }
 
 
@@ -423,13 +432,13 @@ sub determine_fk_value {
 
     debugf("Column $col is a foreign key references $ref_table.$ref_col.");
 
-    if ( $self->valspec()->{$table}{$col} ) {
+    if ( $self->_valspec()->{$table}{$col} ) {
 
         # 
         #  (1)値の決定方法に指定がある場合は、その方法により値を決定する。
         #
     
-        if ( my $valspec_col = $self->valspec()->{$table}{$col} ) {
+        if ( my $valspec_col = $self->_valspec()->{$table}{$col} ) {
             $value = $self->determine_value( $valspec_col );
         }
 
@@ -454,7 +463,7 @@ sub determine_fk_value {
         #  現在参照先テーブルにあるPK値を取得する
         #  結果は 
         #  $ref_ids => { (id1)  => 1, (id2) => 1, ... }  という形で取得される。
-        my $ref_ids = $self->get_current_distinct_values($ref_table, $ref_col); 
+        my $ref_ids = $self->_get_current_distinct_values($ref_table, $ref_col); 
     
 
         #  現存する参照先の値から1つ適当に選ぶ(1レコード以上ある場合)
@@ -467,7 +476,7 @@ sub determine_fk_value {
         else {
             #  参照先にはまだレコードがないので、適当に作成   
             $value = $self->process_table($ref_table);      #  IDを指定していないので適当な値がIDになるはず
-            $self->distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
+            $self->_distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
             debugf("Referenced record created. id = $value");
             
         }
@@ -495,9 +504,9 @@ sub get_id {
 
         #  呼び出し元から指定された条件があり、それによりPKの値を決定できるか確かめる。
         #  決定できる場合は $real_id にその値が入る。
-        if (    $self->valspec()->{$table} 
-                and $self->valspec()->{$table}{$col} 
-                and $real_id = $self->determine_value( $self->valspec()->{$table}{$col} ) 
+        if (    $self->_valspec()->{$table} 
+                and $self->_valspec()->{$table}{$col} 
+                and $real_id = $self->determine_value( $self->_valspec()->{$table}{$col} ) 
         ) 
         {
 
@@ -549,7 +558,7 @@ sub get_cols_requiring_value {
 
         #  ユーザから値の指定がある場合は、必ずそれを使って指定する。
         #  なければ、列定義により、指定の要否を決める。
-        unless ( defined( $self->valspec()->{$table}{$col} ) ) {
+        unless ( defined( $self->_valspec()->{$table}{$col} ) ) {
 
             my $col_def = $table_def->column_def($col);
 
@@ -713,34 +722,40 @@ sub _val_datetime {
 
 
 
-=pod get_current_distinct_values($table, $col)
+=pod _get_current_distinct_values($table, $col)
 
 $table, $col で指定された表・列の値(distinct値)を一定個数取得する。
 
 
 =cut
 
-sub get_current_distinct_values {
+sub _get_current_distinct_values {
     my ($self, $table, $col) = @_;
 
-    my $current = $self->distinct_val()->{$table}{$col};
+    my $current = $self->_distinct_val()->{$table}{$col};
 
     if ( !defined $current or keys %$current == 0 ) {
 
         #  現存するレコードを確認
-        my $sql = "SELECT DISTINCT $col FROM $table LIMIT $DISTINCT_VAL_FETCH_LIMIT";
-        my $res = $self->dbh()->selectall_arrayref($sql);
+        #  SELECT DISTINCT $col FROM $table LIMIT $DISTINCT_VAL_FETCH_LIMIT;
+        my $select = $self->_sql_maker->new_select(distinct => 1);
+        my ($sql, @bind) = $select->add_select($col)
+                            ->add_from($table)
+                            ->limit($DISTINCT_VAL_FETCH_LIMIT)
+                            ->as_sql();
+
+        my $res = $self->dbh()->selectall_arrayref($sql, undef, @bind);
 
         my %values = map { $_->[0] => 1 } @$res;
 
-        $current = $self->distinct_val()->{$table}{$col} = { %values };
+        $current = $self->_distinct_val()->{$table}{$col} = { %values };
     }
 
     return $current;
 }
 
 
-=pod set_user_valspec($table_name, $valspec)
+=pod _set_user_valspec($table_name, $valspec)
 
 insert を実行するときの条件を設定する。
 (これまで設定していた条件はクリアされる)
@@ -748,87 +763,124 @@ insert を実行するときの条件を設定する。
 
 =cut
 
-sub set_user_valspec {
+sub _set_user_valspec {
     my ($self, $table, $table_valspec) = @_;
 
     #  前回の条件をクリア
-    $self->valspec({});
-    $self->distinct_val() or $self->distinct_val({}); 
+    $self->_valspec({});
 
-    $self->add_user_valspec($table, $table_valspec);
+    $self->_add_user_valspec($table, $table_valspec);
 }
 
 
-=pod add_user_valspec
+=pod _add_user_valspec($table, $table_valspec)
 
 次回 insert を実行したときの条件を設定する。
 (これまで設定していた条件に追加する)
 
 =cut
 
-sub add_user_valspec {
+sub _add_user_valspec {
     my ($self, $table, $table_valspec) = @_;
 
-    defined $table and $table =~ /^\w+$/
-        or confess "Invalid table name [$table]";
+    defined $table and length($table) > 0
+        or confess "Missing table name";
 
     defined $table_valspec and ref $table_valspec eq 'HASH'
         or confess "Invalid user valspec. " . Dumper($table_valspec);
 
 
     for my $col (keys %$table_valspec) {
-        
+         
         my $_table = $table;
         my $_col   = $col;
 
-        if ( $col =~ /^\w+\.\w+$/ ) {
-            ($_table, $_col) = split '\.', $col;
+        if ( $col =~ /\./ ) {
+            ($_table, $_col, my @_dummy) = split '\.', $col;
+
+            #  column name may include only one dot.
+            defined($_table) and length($_table) > 0 
+            and defined($_col) and length($_col) > 0
+            and @_dummy == 0 
+                or confess "Invalid column name : $col"; 
         }
 
         my $val = $table_valspec->{$col};
 
+        #  At first, clear all values with the same key.
+        delete $self->_valspec()->{$_table}{$_col};
+
         if ( ref $val eq 'ARRAY' ) {
-            $self->valspec()->{$_table}{$_col}{random} = $val;
+            #  arrayref : select one from the list randomly.
+            $self->_valspec()->{$_table}{$_col}{random} = $val;
+
         }
         elsif ( ref $val eq 'HASH' ) {
+            #  hash : 
+            #  currently { random => [ ... ] } or { fixval => $scalar } 
+            #  may be specified.
             for (keys %$val) {
-                $self->valspec()->{$_table}{$_col}{$_} = $val->{$_};
+                $self->_valspec()->{$_table}{$_col}{$_} = $val->{$_};
             }
+
         }
         elsif ( ref $val eq '' ) {
-            $self->valspec()->{$_table}{$_col}{fixval} = $val;
+            #  scalar : fix value
+            $self->_valspec()->{$_table}{$_col}{fixval} = $val;
+
         }
+        else {
+            confess "NOTREACHED";
+        }
+
     }
 
 }   
 
 
 
-sub get_auto_increment_value {
-    my ($self, $table_def) = @_;
+=head2 delete_all()
 
-    return $table_def->get_auto_increment_value();
-}
+deletes all rows inserted by this instance.
 
+CAUTION: delete_all() won't delete rows in tables which don't have primary key.
+
+
+=cut
 
 sub delete_all {
     my ($self) = @_;
 
     my $dbh = $self->dbh();
 
-    $dbh->do('SET FOREIGN_KEY_CHECKS = 0');
+    my $fk_check = $self->_check_fk_check_status();
+
+    if ( $fk_check eq 'ON' or $fk_check == 1 ) {
+        $dbh->do('SET FOREIGN_KEY_CHECKS = 0');
+    }
 
     for my $table ( keys %{ $self->inserted() } ) {
         my $pk_name = $self->_table_def($table)->pk_columns()->[0];
-        my $sth = $dbh->prepare( qq{DELETE FROM $table WHERE $pk_name = ?} );
+
         for my $val ( @{ $self->inserted->{$table} } ) {
-            $sth->execute($val);
-            debugf("DELETE FROM $table WHERE $pk_name = $val");
+            my ($sql, @bind) = $self->_sql_maker->delete($table, { $pk_name => $val });
+            $dbh->do($sql, undef, @bind);
+            debugf(qq{DELETE FROM `$table` WHERE `$pk_name` = "$val"});
         }
     }
 
-    $dbh->do('SET FOREIGN_KEY_CHECKS = 1');
+    if ( $fk_check eq 'ON' or $fk_check == 1 ) {
+        $dbh->do('SET FOREIGN_KEY_CHECKS = 1');
+    }
+}
 
+
+sub _check_fk_check_status {
+    my ($self) = @_;
+
+    my @rows = $self->dbh->selectrow_array(q{SHOW VARIABLES LIKE '%foreign_key_checks%'});
+
+    return $rows[1];
 }
 
 

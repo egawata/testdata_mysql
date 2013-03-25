@@ -59,7 +59,7 @@ sub test_with_valspec {
 
     #  値の決定方法に指定があり、かつ参照先レコードがすでに存在する場合
     #    -> ID は指定に従う。参照先テーブルにレコードは追加しない。
-    $hd->set_user_valspec('table2', { table1_id => 100 });
+    $hd->_set_user_valspec('table2', { table1_id => 100 });
     is($hd->determine_fk_value('table2', 'table1_id', { table => 'table1', column => 'id' }), 100);
     is(rowcount($dbh, 'table1'), 1);
     select_all($dbh, 'table1');
@@ -67,7 +67,7 @@ sub test_with_valspec {
 
     #  値の決定方法に指定があり、かつ参照先レコードが存在しない場合
     #    -> ID は指定に従う。さらにそのIDを持つレコードを参照先テーブルに追加する。
-    $hd->set_user_valspec('table2', { table1_id => 200 });
+    $hd->_set_user_valspec('table2', { table1_id => 200 });
     is($hd->determine_fk_value('table2', 'table1_id', { table => 'table1', column => 'id' }), 200);
     is(rowcount($dbh, 'table1'), 2);
     my @res = $dbh->selectrow_array(qq{
@@ -100,7 +100,7 @@ sub test_without_valspec {
     #  値の決定方法に指定がなく、かつ参照先テーブルにレコードが1件も存在しない場合
     #    -> ID を適当に決めて参照先テーブルにレコード追加。
     #       そのIDを参照元の値とする。
-    $hd->set_user_valspec('table12', {});
+    $hd->_set_user_valspec('table12', {});
     my $refid = $hd->determine_fk_value('table12', 'table11_id', { table => 'table11', column => 'id' });
     is(rowcount($dbh, 'table11'), 1);    #  レコードが追加された
     
@@ -137,7 +137,7 @@ sub test_without_valspec_2 {
     #  値の決定方法に指定がなく、かつ参照先テーブルにレコードが数件存在する場合
     #    -> 参照先テーブルにあるレコードの中から1件を選び、
     #       そのIDを参照元の値とする。
-    $hd->set_user_valspec('table22', {});
+    $hd->_set_user_valspec('table22', {});
     my $refid = $hd->determine_fk_value('table22', 'table21_id', { table => 'table21', column => 'id' });
     is(rowcount($dbh, 'table21'), 2);    #  レコードは追加されない
     ok($refid == 100 or $refid == 200);

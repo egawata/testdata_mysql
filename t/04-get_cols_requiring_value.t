@@ -61,7 +61,7 @@ sub test_0 {
     my $cols = $hd->get_cols_requiring_value('table_test_0');
     is_deeply($cols, []);
 
-    $hd->set_user_valspec('table_test_0', { id => 100 });
+    $hd->_set_user_valspec('table_test_0', { id => 100 });
     $cols = $hd->get_cols_requiring_value('table_test_0');
     is_deeply($cols, ['id']);
 }
@@ -89,7 +89,7 @@ sub test_1 {
     my $cols = $hd->get_cols_requiring_value('table_test_1');
     is_deeply($cols, []);
 
-    $hd->set_user_valspec('table_test_1', { id => 200 });
+    $hd->_set_user_valspec('table_test_1', { id => 200 });
     $cols = $hd->get_cols_requiring_value('table_test_1');
     is_deeply($cols, ['id']);
 }
@@ -117,7 +117,7 @@ sub test_2 {
     my $cols = $hd->get_cols_requiring_value('table_test_2');
     is_deeply($cols, []);
 
-    $hd->set_user_valspec('table_test_2', { id => 30 });
+    $hd->_set_user_valspec('table_test_2', { id => 30 });
     $cols = $hd->get_cols_requiring_value('table_test_2');
     is_deeply($cols, ['id']);
 }

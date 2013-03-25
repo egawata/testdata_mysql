@@ -86,7 +86,7 @@ sub test_0 {
     my $hd = Test::HandyData::mysql->new(dbh => $dbh);
 
     #  specifies key value
-    $hd->set_user_valspec('table_test_0', { id => 99 });
+    $hd->_set_user_valspec('table_test_0', { id => 99 });
     my ($exp_id, $real_id) = $hd->get_id('table_test_0');
     is($exp_id, 99);
     is($real_id, 99);
@@ -96,7 +96,7 @@ sub test_0 {
     print "ID: $id\n";
 
     #  clear valspec 
-    $hd->set_user_valspec('table_test_0', {});
+    $hd->_set_user_valspec('table_test_0', {});
 
     #  retrieves next auto_increment value (maybe 100)
     ($exp_id, $real_id) = $hd->get_id('table_test_0');
