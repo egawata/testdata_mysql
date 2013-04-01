@@ -261,7 +261,7 @@ sub process_table {
     #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
     #  $real_id : 実際に割り当てられたID。ユーザ指定があればその値になるが、auto_increment の場合は undef
     my ($exp_id, $real_id) = $self->get_id($table, $tmpl_valspec);
-    debugf("id is ($exp_id, " . ($real_id || '(undef)') . ")");
+    debugf("id is (" . ($exp_id || '(undef)') . ", " . ($real_id || '(undef)') . ")");
     
     #  値を指定する必要のある列を抽出する
     my @colnames = $self->get_cols_requiring_value($table, $table_def->def);
@@ -329,11 +329,16 @@ sub process_table {
         confess $@
     }
         
-
-    my $inserted_id = $real_id || $dbh->{'mysql_insertid'};
-    $self->add_inserted_id($table, $inserted_id);
+    my $inserted_id = undef;
    
-    debugf("Inserted. table = $table, id = $inserted_id");
+    
+    #  Handles PK value only when the table has single pk column.
+    if ( @{ $table_def->pk_columns() } == 1 ) {
+        $inserted_id = $real_id || $dbh->{'mysql_insertid'};
+        $self->add_inserted_id($table, $inserted_id);
+   
+        debugf("Inserted. table = $table, id = $inserted_id");
+    }
     
     return $inserted_id;
 }
@@ -601,32 +606,36 @@ sub _val_varchar {
     my ($self, $col_def, $exp_id) = @_;
 
     my $maxlen = $col_def->character_maximum_length;
+    debugf("Maxlen is $maxlen");
 
-    my $pk_length = length($exp_id);
-    my $colname = $col_def->name;
-    my $colname_length = length($colname);
+    if ( defined $exp_id ) {
+        my $pk_length = length($exp_id);
+        my $colname = $col_def->name;
+        my $colname_length = length($colname);
 
-    if ( $colname_length + $pk_length + 1 <= $maxlen ) {       #  (colname)_(num)
-        return sprintf("%s_%d", $colname, $exp_id);
-    }
-    elsif ( $pk_length + 1 <= $maxlen ) {                      #  (part_of_colname)_(num)
-        my $part_of_colname = substr($colname, 0, $maxlen - $pk_length - 1);
-        return sprintf("%s_%d", $part_of_colname, $exp_id);
-    }
-    elsif ( $pk_length == $maxlen ) {
-        return $exp_id;
-    }   
-    else {                                                      #  random string
-        $maxlen > $LENGTH_LIMIT_VARCHAR 
-            or $maxlen = $LENGTH_LIMIT_VARCHAR;
-
-        my $string = '';
-        for (1 .. $maxlen) {
-            $string .= $VARCHAR_LIST[ int( rand() * $COUNT_VARCHAR_LIST ) ];
+        if ( $colname_length + $pk_length + 1 <= $maxlen ) {       #  (colname)_(num)
+            return sprintf("%s_%d", $colname, $exp_id);
         }
-
-        return $string;
+        elsif ( $pk_length + 1 <= $maxlen ) {                      #  (part_of_colname)_(num)
+            my $part_of_colname = substr($colname, 0, $maxlen - $pk_length - 1);
+            return sprintf("%s_%d", $part_of_colname, $exp_id);
+        }
+        elsif ( $pk_length == $maxlen ) {
+            return $exp_id;
+        }   
     }
+
+    $maxlen > $LENGTH_LIMIT_VARCHAR 
+        and $maxlen = $LENGTH_LIMIT_VARCHAR;
+    debugf("Maxlen is $maxlen");
+
+    my $string = '';
+    for (1 .. $maxlen) {
+        $string .= $VARCHAR_LIST[ int( rand() * $COUNT_VARCHAR_LIST ) ];
+    }
+    debugf("Result string is $string");
+
+    return $string;
 
 }
 
