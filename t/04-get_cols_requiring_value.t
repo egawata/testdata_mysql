@@ -72,6 +72,7 @@ sub test_0 {
 defalut 値が設定されていればそれを使用するので、結果から除外する。
 ただしユーザから指定された場合はそれを使用するので、結果に含まれる。
 
+* 外部キー制約がある場合に不具合が出るため、デフォルト値でのユーザ指定があった場合と同様に処理
 
 =cut
 
@@ -87,7 +88,7 @@ sub test_1 {
     my $hd = Test::HandyData::mysql->new(dbh => $dbh);
 
     my $cols = $hd->get_cols_requiring_value('table_test_1');
-    is_deeply($cols, []);
+    is_deeply($cols, ['id']);
 
     $hd->_set_user_valspec('table_test_1', { id => 200 });
     $cols = $hd->get_cols_requiring_value('table_test_1');

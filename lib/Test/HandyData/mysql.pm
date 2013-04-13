@@ -279,6 +279,9 @@ sub process_table {
             next;
         }
 
+        my $col_def = $table_def->column_def($col) 
+            or confess "No column def found. $col";
+
 
         #  (2)外部キー制約の有無を確認(fk = 1 のときのみ)
         #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
@@ -287,6 +290,11 @@ sub process_table {
                 $value = $self->determine_fk_value($table, $col, $referenced_table_col);
             }
         }
+
+        #  (2.5)default値が指定されている場合はそれを使う
+        if ( !defined($value) and defined($col_def->column_default) ) {
+            $value = $col_def->column_default;
+        }            
 
 
         #  (3)列に値決定のルールが設定されていればそれを使う
@@ -297,9 +305,6 @@ sub process_table {
 
         #  (4)ルールが設定されていなければ、ランダムに値を決定する
         if ( !defined($value) ) {
-
-            my $col_def = $table_def->column_def($col) 
-                or confess "No column def found. $col";
 
             my $type = $col_def->data_type;
             my $func = $VALUE_DEF_FUNC{$type}
@@ -452,11 +457,12 @@ sub determine_fk_value {
         #  参照先テーブルの内容を毎回問い合わせるのは効率が悪いと考えたが、
         #  参照先のレコード数が大量の場合はメモリを浪費してしまうことも考慮し、
         #  あえて毎回問い合わせることにした。
+        $self->_add_record_if_not_exist($ref_table, $ref_col, $value);
 
-        if ( 0 == $self->_value_exists_in_table_col($ref_table, $ref_col, $value) ) {     #  No record exists
-            $self->process_table($ref_table, { $ref_col => $value });       #  レコード作成
-            debugf("A referenced record created. id = $value");
-        }
+    }
+    elsif ( my $column_default = $self->_table_def($table)->column_def($col)->column_default ) {
+        $value = $column_default;
+        $self->_add_record_if_not_exist($ref_table, $ref_col, $value);
 
     }
     else {
@@ -571,7 +577,9 @@ sub get_cols_requiring_value {
             next if $col_def->is_auto_increment;
 
             #  default 値が指定されている場合はそれを使用するので、指定の必要なし
-            next if defined($col_def->column_default);
+            #  XXX: default値あり、かつfk制約がある場合に上手く動かないので、
+            #       default値がある場合であっても明示的に指定するようにする。
+            #next if defined($col_def->column_default);
 
             #  NULL 値が認められているのであれば指定しない
             next if $col_def->is_nullable eq 'YES';
@@ -892,6 +900,21 @@ sub _check_fk_check_status {
     return $rows[1];
 }
 
+
+=pod _add_record_if_not_exist($table, $col, $value)
+
+Inserts a record only if record(s) which value of column $col is $value doesn't exist.
+
+=cut
+
+sub _add_record_if_not_exist {
+    my ($self, $table, $col, $value) = @_;
+
+    if ( 0 == $self->_value_exists_in_table_col($table, $col, $value) ) {     #  No record exists
+        $self->process_table($table, { $col => $value });       #  レコード作成
+        debugf("A referenced record created. id = $value");
+    }
+}
 
 1;
 

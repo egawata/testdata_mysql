@@ -34,6 +34,8 @@ sub main {
     #  Write test code here.
     test_nullable($hd);
     test_pk($hd);
+    test_notnull_nofk($hd);
+    test_notnull_default_fk($hd);
 
 
     $dbh->disconnect();
@@ -133,9 +135,72 @@ sub test_pk {
 }
 
 
-sub test_notnull {
+sub test_notnull_nofk {
     my ($hd) = @_;
+    my $dbh = $hd->dbh;
 
+    $dbh->do(q{
+        CREATE TABLE test_notnull_nofk (
+            id integer primary key auto_increment,
+            nodefault1 int not null,
+            nodefault2 varchar(10) not null,
+            default1   int not null default 10,
+            default2   varchar(10) not null default 'Default'
+        )
+    });
+    my $id = $hd->process_table('test_notnull_nofk', {});
 
+    my $res = $dbh->selectrow_hashref(q{SELECT * FROM test_notnull_nofk WHERE ID = ?}, undef, $id);
+    like($res->{nodefault1}, qr/^\d+$/, "random value is $res->{nodefault1}");
+    like($res->{nodefault2}, qr/^\w{10}$/, "random value is $res->{nodefault2}");
+    is($res->{default1}, 10);
+    is($res->{default2}, 'Default');
 }
         
+
+sub test_notnull_default_fk {
+    my ($hd) = @_;
+    my $dbh = $hd->dbh;
+
+    $hd->fk(1);
+
+    $dbh->do(q{DROP TABLE IF EXISTS test1});
+    $dbh->do(q{DROP TABLE IF EXISTS foreign1});
+    $dbh->do(q{
+        CREATE TABLE foreign1 (
+            id integer primary key auto_increment
+        )});
+    $dbh->do(q{
+        CREATE TABLE test1 (
+            id integer primary key auto_increment,
+            default1 int not null default 10,
+            constraint foreign key (default1) references foreign1 (id)
+        )});
+    
+    #  first time (referenced record doesn't exist)
+    my $id;
+    lives_ok { $id = $hd->process_table('test1', {}); }
+        or diag "Maybe failed to add record to referenced table";
+
+    my $res = $dbh->selectrow_hashref(q{SELECT * FROM test1 WHERE id = ?}, undef, $id);
+    is($res->{default1}, 10);
+
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM foreign1 LIMIT 1});
+    is($res->{id}, 10);
+
+    #  second time (referenced record already exists)
+    lives_ok { $id = $hd->process_table('test1', {}); }
+        or diag "Maybe failed to add record to referenced table";
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM test1 WHERE id = ?}, undef, $id);
+    is($res->{default1}, 10);
+  
+    #  No additional records exist 
+    $res = $dbh->selectrow_hashref(q{SELECT COUNT(*) as count FROM foreign1});
+    is($res->{count}, 1);
+     
+
+    $hd->fk(0);
+}
+
+
+
