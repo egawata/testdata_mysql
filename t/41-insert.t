@@ -36,6 +36,7 @@ sub main {
     test_pk($hd);
     test_notnull_nofk($hd);
     test_notnull_default_fk($hd);
+    test_notnull_nodefault_fk($hd);
 
 
     $dbh->disconnect();
@@ -67,7 +68,7 @@ sub test_nullable {
         )
     });
     
-    my $id = $hd->process_table('test_nullable');
+    my $id = $hd->insert('test_nullable');
     is($id, undef);
 
     my ($count) = $dbh->selectrow_array(q{ SELECT COUNT(*) FROM test_nullable });
@@ -98,16 +99,16 @@ sub test_pk {
             id int primary key auto_increment
         )});
     #  If pk value is specified, the value will be used.
-    my $id = $hd->process_table('test_pk_ai', { id => 200 });
+    my $id = $hd->insert('test_pk_ai', { id => 200 });
     is($id, 200);
 
     #  If pk value is not specified and pk column is auto_increment,
     #  auto_increment value will be used.
     $dbh->do(q{ALTER TABLE test_pk_ai AUTO_INCREMENT = 300});
     $hd->_set_user_valspec('test_pk_ai', {});   #  reset valspec
-    $id = $hd->process_table('test_pk_ai');
+    $id = $hd->insert('test_pk_ai');
     is($id, 300);
-    $id = $hd->process_table('test_pk_ai');
+    $id = $hd->insert('test_pk_ai');
     is($id, 301);
     
     #  Non-auto_increment primary key 
@@ -116,7 +117,7 @@ sub test_pk {
             id int primary key
         )});
     #  Random value will be assigned.
-    $id = $hd->process_table('test_pk_nai');
+    $id = $hd->insert('test_pk_nai');
     like($id, qr/^\d+$/, "(random id is $id)");
    
     
@@ -125,12 +126,12 @@ sub test_pk {
         CREATE TABLE test_pk_varchar (
             id varchar(10) primary key
         )});
-    $id = $hd->process_table('test_pk_varchar');
+    $id = $hd->insert('test_pk_varchar');
     like($id, qr/^\w{10}$/, "(random id is $id)");
-    $id = $hd->process_table('test_pk_varchar');
+    $id = $hd->insert('test_pk_varchar');
     like($id, qr/^\w{10}$/, "(random id is $id)");
 
-    $id = $hd->process_table('test_pk_varchar', { id => 'abcde12345' });
+    $id = $hd->insert('test_pk_varchar', { id => 'abcde12345' });
     is($id, 'abcde12345');     
 }
 
@@ -148,7 +149,7 @@ sub test_notnull_nofk {
             default2   varchar(10) not null default 'Default'
         )
     });
-    my $id = $hd->process_table('test_notnull_nofk', {});
+    my $id = $hd->insert('test_notnull_nofk', {});
 
     my $res = $dbh->selectrow_hashref(q{SELECT * FROM test_notnull_nofk WHERE ID = ?}, undef, $id);
     like($res->{nodefault1}, qr/^\d+$/, "random value is $res->{nodefault1}");
@@ -179,7 +180,7 @@ sub test_notnull_default_fk {
     
     #  first time (referenced record doesn't exist)
     my $id;
-    lives_ok { $id = $hd->process_table('test1', {}); }
+    lives_ok { $id = $hd->insert('test1', {}); }
         or diag "Maybe failed to add record to referenced table";
 
     my $res = $dbh->selectrow_hashref(q{SELECT * FROM test1 WHERE id = ?}, undef, $id);
@@ -189,18 +190,149 @@ sub test_notnull_default_fk {
     is($res->{id}, 10);
 
     #  second time (referenced record already exists)
-    lives_ok { $id = $hd->process_table('test1', {}); }
+    lives_ok { $id = $hd->insert('test1', {}); }
         or diag "Maybe failed to add record to referenced table";
     $res = $dbh->selectrow_hashref(q{SELECT * FROM test1 WHERE id = ?}, undef, $id);
     is($res->{default1}, 10);
   
     #  No additional records exist 
-    $res = $dbh->selectrow_hashref(q{SELECT COUNT(*) as count FROM foreign1});
-    is($res->{count}, 1);
+    _check_row_count($dbh, 'foreign1', 1);
      
 
     $hd->fk(0);
 }
+
+
+
+sub test_notnull_nodefault_fk {
+    my ($hd) = @_;
+    my $dbh = $hd->dbh;
+
+    $hd->fk(1);
+    $dbh->do(q{DROP TABLE IF EXISTS test2});
+    $dbh->do(q{DROP TABLE IF EXISTS foreign2});
+    $dbh->do(q{
+        CREATE TABLE foreign2 (
+            id integer primary key auto_increment
+        )});
+    $dbh->do(q{ALTER TABLE foreign2 AUTO_INCREMENT = 1});
+    $dbh->do(q{
+        CREATE TABLE test2 (
+            id integer primary key auto_increment,
+            default1 int not null,
+            constraint foreign key (default1) references foreign2 (id)
+        )});
+
+    my $id;
+    my $res;
+
+    #
+    #  No record exists in foreign2
+    #
+    $id = $hd->insert('test2', {});
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM test2 WHERE id = ?}, undef, $id);
+    my $test2_id = $res->{id};
+    my $default1 = $res->{default1};
+
+    $res = $dbh->selectrow_hashref(q{SELECT COUNT(*) as count FROM foreign2 WHERE id = ?}, undef, $default1);
+    is($res->{count}, 1);
+    
+    $dbh->do(q{DELETE FROM test2 WHERE id = ?}, undef, $test2_id);
+    $dbh->do(q{DELETE FROM foreign2 WHERE id = ?}, undef, $default1);
+
+    my $INSERT_COUNT = 100;
+
+    for ( 1 .. $INSERT_COUNT ) {
+        $dbh->do(q{INSERT INTO foreign2 (id) VALUES(?)}, undef, $_ * 10007);
+    }
+
+    #
+    #  No user value specified as column 'default1'
+    #
+    lives_ok { $id = $hd->insert('test2', {}) };
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM test2 WHERE id = ?}, undef, $id);
+    is( $res->{default1} % 10007, 0)
+        or diag "default1 is $res->{default1}";
+
+    #  No additional records exist
+    _check_row_count($dbh, 'foreign2', $INSERT_COUNT);
+
+    
+    #
+    #  'default1' is specified as one of foreign2.id
+    #
+    lives_ok { $id = $hd->insert('test2', { default1 => 10007 * 6 }) };
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM test2 WHERE id = ?}, undef, $id);
+    is( $res->{default1}, 10007 * 6 );
+
+    #  No additional records exist
+    _check_row_count($dbh, 'foreign2', $INSERT_COUNT);
+
+    
+    #
+    #  'default1' is specified as a value which doesn't exist in foreign2.id
+    #
+    $INSERT_COUNT++;
+    lives_ok {
+        $id = $hd->insert('test2', { default1 => 10007 * $INSERT_COUNT });
+    };
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM test2 WHERE id = ?}, undef, $id);
+    is( $res->{default1}, 10007 * $INSERT_COUNT );
+
+    #  Additional record has been created.
+    _check_row_count($dbh, 'foreign2', $INSERT_COUNT);
+    $res = $dbh->selectrow_hashref(q{SELECT COUNT(*) as count FROM foreign2 WHERE id = ?}, undef, 10007 * $INSERT_COUNT);
+    is( $res->{count}, 1 );
+    
+
+    #
+    #  'default1' itself is not specified, instead foreign2.id is specified which already exists in foreign2
+    #
+    lives_ok {
+        $id = $hd->insert('test2', { 'foreign2.id' => 10007 * 7 });
+    };
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM test2 WHERE id = ?}, undef, $id);
+    is( $res->{default1}, 10007 * 7 );
+
+    #  No additional records exist
+    _check_row_count($dbh, 'foreign2', $INSERT_COUNT);
+    
+
+    #
+    #  'default1' itself is not specified, instead foreign2.id is specified which doesn't exist in foreign2
+    #
+    $INSERT_COUNT++;
+    lives_ok {
+        $id = $hd->insert('test2', { 'foreign2.id' => 10007 * $INSERT_COUNT });
+    };
+    $res = $dbh->selectrow_hashref(q{SELECT * FROM test2 WHERE id = ?}, undef, $id);
+    is( $res->{default1}, 10007 * $INSERT_COUNT );
+
+    #  Additional record has been created. 
+    _check_row_count($dbh, 'foreign2', $INSERT_COUNT);
+    $res = $dbh->selectrow_hashref(q{SELECT COUNT(*) as count FROM foreign2 WHERE id = ?}, undef, 10007 * $INSERT_COUNT);
+    is( $res->{count}, 1 );
+
+
+    $hd->fk(0);
+}
+
+
+sub _check_row_count {
+    my ($dbh, $table, $count) = @_;
+
+    my $res = $dbh->selectrow_hashref(qq{SELECT COUNT(*) as count FROM $table});
+    is($res->{count}, $count);
+}
+
+
+
+
+    
+
+
+
+     
 
 
 

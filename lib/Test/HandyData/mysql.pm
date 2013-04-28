@@ -324,7 +324,7 @@ sub process_table {
 
     eval {
         my ($sql, @bind) = $self->_sql_maker->insert($table, \%values);
-        debugf($sql, ", binds [" . (join ', ', @bind));
+        debugf($sql .  ", binds [" . (join ', ', @bind) . "]");
 
         my $sth = $dbh->prepare($sql);
         $sth->execute(@bind);
@@ -442,15 +442,13 @@ sub determine_fk_value {
 
     debugf("Column $col is a foreign key references $ref_table.$ref_col.");
 
-    if ( $self->_valspec()->{$table}{$col} ) {
+    if ( my $valspec_col = $self->_valspec()->{$table}{$col} || $self->_valspec()->{$ref_table}{$ref_col} ) {
+        debugf("Value is specified. : " . Dumper($valspec_col));
 
         # 
         #  (1)値の決定方法に指定がある場合は、その方法により値を決定する。
         #
-    
-        if ( my $valspec_col = $self->_valspec()->{$table}{$col} ) {
-            $value = $self->determine_value( $valspec_col );
-        }
+        $value = $self->determine_value( $valspec_col );
 
         #  その値を持つレコードが参照先テーブルになければ、参照先にその値を持つレコードを新たに作成
         #  
@@ -461,11 +459,13 @@ sub determine_fk_value {
 
     }
     elsif ( my $column_default = $self->_table_def($table)->column_def($col)->column_default ) {
+        debugf("Column default is specified. value = $column_default");
         $value = $column_default;
         $self->_add_record_if_not_exist($ref_table, $ref_col, $value);
 
     }
     else {
+        debugf("No value is specified. Trying to retrieve list of ids from $ref_table");
 
         #
         #  (2)値の決定方法にユーザ指定がない場合
@@ -749,9 +749,15 @@ $table, $col で指定された表・列の値(distinct値)を一定個数取得
 sub _get_current_distinct_values {
     my ($self, $table, $col) = @_;
 
-    my $current = $self->_distinct_val()->{$table}{$col};
+    my $current;
 
-    if ( !defined $current or keys %$current == 0 ) {
+    #  At first, I tried to cache distinct values, but when user delete records, 
+    #  those cached values are incorrect, and Test::Handy data has no idea
+    #  which records have been already deleted.
+    #  So I decide not to cache distinct values and query them every time. 
+
+    #my $current = $self->_distinct_val()->{$table}{$col};
+    #if ( !defined $current or keys %$current == 0 ) {
 
         #  現存するレコードを確認
         #  SELECT DISTINCT $col FROM $table LIMIT $DISTINCT_VAL_FETCH_LIMIT;
@@ -766,7 +772,7 @@ sub _get_current_distinct_values {
         my %values = map { $_->[0] => 1 } @$res;
 
         $current = $self->_distinct_val()->{$table}{$col} = { %values };
-    }
+    #}
 
     return $current;
 }
@@ -851,6 +857,8 @@ sub _add_user_valspec {
         }
 
     }
+
+    debugf("Valspec is " . Dumper($self->_valspec()));
 
 }   
 
