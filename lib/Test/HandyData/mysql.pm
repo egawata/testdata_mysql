@@ -287,7 +287,12 @@ sub process_table {
         #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
         if ( $self->fk ) {
             if ( my $referenced_table_col = $table_def->is_fk($col) ) {     #  ret = { table => 'table name, column => 'column name' }
-                $value = $self->determine_fk_value($table, $col, $referenced_table_col);
+                if ( ref $referenced_table_col eq 'HASH' ) { 
+                    $value = $self->determine_fk_value($table, $col, $referenced_table_col);
+                }
+                else {
+                    warn "Currently only one foreign key per column is supported.";
+                }
             }
         }
 
