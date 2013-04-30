@@ -4,10 +4,12 @@ use strict;
 use warnings;
 
 use Test::More;
+use Test::Exception;
 use DBI;
 use Test::mysqld;
+use Data::Dumper;
 
-use Test::HandyData::mysql::TableDef;
+use Test::HandyData::mysql;
 
 
 main();
@@ -26,18 +28,8 @@ sub main {
     ) or die $DBI::errstr;
     $dbh->{RaiseError} = 1;
 
-    $dbh->do(q{
-        CREATE TABLE table1 (
-            id integer primary key auto_increment,
-            col1 varchar(100),
-            col2 varchar(200)
-        )
-    });
-
-    my $table_def = Test::HandyData::mysql::TableDef->new(dbh => $dbh, table_name => 'table1');
-    my $colnames = $table_def->colnames();
-
-    is_deeply([sort(@$colnames)], [ qw/ col1 col2 id / ]);
+    my $td = Test::HandyData::mysql::TableDef->new(dbh => $dbh, table => 'table1');
+    is($td->_dbname(), 'test');
 
     $dbh->disconnect();
 

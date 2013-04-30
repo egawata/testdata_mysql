@@ -26,7 +26,7 @@ This documentation refers to Test::HandyData::mysql::TableDef version 0.0.1
     use DBI;
    
     my $dbh = DBI->connect('dbi:mysql:dbname=testdb', 'username', 'password');     
-    my $table_def = Test::HandyData::mysql::TableDef->new($dbh, 'table1');
+    my $table_def = Test::HandyData::mysql::TableDef->new( dbh => $dbh, table_name => 'table1');
 
 
 
@@ -38,21 +38,19 @@ Mysql におけるテーブル定義を管理するクラス。
 
 =head1 METHODS 
 
-=head2 new($dbh, $table_name)
+=head2 new(%params)
 
 Constructor.
 
 =cut
 
 sub new {
-    my ($inv, $dbh, $table_name) = @_;
+    my ($inv, @params) = @_;
+
+    my %params = ( ref $params[0] eq 'HASH' ) ? %{ $params[0] } : @params;
 
     my $class = ref $inv || $inv;
-    my $self = bless {}, $class;
-
-    
-    $self->dbh($dbh) if $dbh;
-    $self->table_name($table_name) if $table_name;
+    my $self = bless { %params }, $class;
 
     $self;
 }
@@ -72,10 +70,19 @@ sub dbh {
     defined $dbh
         and $self->{dbh} = $dbh;
 
-    $self->{dbh} or confess "No dbh specified";
     return $self->{dbh};
 }
 
+
+#  Returns dbh. Dies if $self->dbh is empty.
+sub _get_dbh {
+    my ($self) = @_;
+
+    my $dbh = $self->dbh()
+        or confess "dbh is empty. You should set dbh beforehand.";
+
+    return $dbh;
+}
 
 
 =head2 table_name($name)
@@ -87,12 +94,26 @@ Setter/getter for table name.
 sub table_name {
     my ($self, $name) = @_;
 
-    defined $name and $self->{table_name} = $name;
+    if ( defined $name ) {
+        $self->{table_name}
+            and confess "table_name is already set. You cannot change it.";
+        $self->{table_name} = $name;
+    }
 
-    defined $self->{table_name} or confess "No table name specified";
     return $self->{table_name};
 }
 
+
+#  Returns table_name. Dies if $self->table_name is empty.
+sub _get_table_name {
+    my ($self) = @_;
+
+    my $table_name = $self->table_name();
+    defined($table_name)
+        or confess "table_name is empty. You should set table_name beforehand.";
+
+    return $table_name;
+}
 
 
 =head2 colnames()
@@ -187,7 +208,7 @@ sub _fk {
     $self->{_fk} ||= {};
 
     unless ( $self->{_fk}{$column_name} ) {
-        my $sth = $self->dbh->prepare(q{
+        my $sth = $self->_get_dbh->prepare(q{
             SELECT referenced_table_name,
                    referenced_column_name
              FROM information_schema.key_column_usage
@@ -278,7 +299,7 @@ sub pk_columns {
    
     unless ( $self->{pk_columns} ) {
 
-        my $sth = $self->dbh->prepare(q{
+        my $sth = $self->_get_dbh->prepare(q{
             SELECT column_name FROM information_schema.key_column_usage
             WHERE constraint_name = 'PRIMARY'
               AND table_schema = ?
@@ -335,7 +356,7 @@ sub get_auto_increment_value {
     my $table = $self->table_name;
 
     my $sql = q{SELECT AUTO_INCREMENT FROM information_schema.tables WHERE table_schema = ? AND table_name = ?};
-    my $sth = $self->dbh()->prepare($sql);
+    my $sth = $self->_get_dbh()->prepare($sql);
     $sth->bind_param(1, $self->_dbname);
     $sth->bind_param(2, $self->table_name);
     $sth->execute();
@@ -358,10 +379,10 @@ sub get_auto_increment_value {
 #  のような形式で返す。 
 #
 sub _get_table_definition {
-    my ($self, $table) = @_;
+    my ($self) = @_;
 
     my $sql = q{SELECT * FROM information_schema.columns WHERE table_schema = ? AND table_name = ?};
-    my $sth = $self->dbh()->prepare($sql);
+    my $sth = $self->_get_dbh()->prepare($sql);
     $sth->bind_param(1, $self->_dbname);
     $sth->bind_param(2, $self->table_name);
     $sth->execute();
@@ -384,7 +405,7 @@ sub _dbname {
     my ($self) = @_;
 
     unless ( $self->{_dbname} ) {
-        my $res = $self->dbh()->selectall_arrayref('SELECT DATABASE()');
+        my $res = $self->_get_dbh()->selectall_arrayref('SELECT DATABASE()');
         $self->{_dbname} = $res->[0]->[0]
             or confess "Failed to get dbname";
     }

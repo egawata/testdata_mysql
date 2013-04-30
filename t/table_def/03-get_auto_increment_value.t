@@ -37,7 +37,7 @@ sub test_table_with_auto_increment_col {
         )
     });
 
-    my $td = Test::HandyData::mysql::TableDef->new($dbh, 'table_test_0');
+    my $td = Test::HandyData::mysql::TableDef->new(dbh => $dbh, table_name => 'table_test_0');
     my $id = $td->get_auto_increment_value();
     is($id, 1);
 
@@ -56,7 +56,7 @@ sub test_table_with_no_auto_increment_col {
             id integer primary key
         )
     });
-    my $td = Test::HandyData::mysql::TableDef->new($dbh, 'table_test_1');
+    my $td = Test::HandyData::mysql::TableDef->new(dbh => $dbh, table_name => 'table_test_1');
     my $id = $td->get_auto_increment_value();
     is($id, undef);
 }

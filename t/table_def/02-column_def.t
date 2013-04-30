@@ -36,7 +36,7 @@ sub test {
         )
     });
 
-    my $td = Test::HandyData::mysql::TableDef->new($dbh, 'table_test_0');
+    my $td = Test::HandyData::mysql::TableDef->new(dbh => $dbh, table_name => 'table_test_0');
     my $col_def = $td->column_def('test1');
 
     isa_ok($col_def, 'Test::HandyData::mysql::ColumnDef');
@@ -54,7 +54,7 @@ sub test_is_auto_increment {
         )
     });
 
-    my $td = Test::HandyData::mysql::TableDef->new($dbh, 'table_test_1');
+    my $td = Test::HandyData::mysql::TableDef->new(dbh => $dbh, table_name => 'table_test_1');
 
     #  'id' has auto_increment attribute.
     my $col_def = $td->column_def('id');

@@ -601,7 +601,8 @@ sub get_cols_requiring_value {
 sub _table_def {
     my ($self, $table) = @_;
 
-    $self->{_table_def}{$table} ||= Test::HandyData::mysql::TableDef->new( $self->dbh, $table );
+    $self->{_table_def}{$table} 
+        ||= Test::HandyData::mysql::TableDef->new( dbh => $self->dbh, table_name => $table );
 
     return $self->{_table_def}{$table};
 }
@@ -734,7 +735,7 @@ sub _val_datetime {
 
     my $dt = DateTime->from_epoch( epoch => time + rand() * 2 * $ONE_YEAR_SEC - $ONE_YEAR_SEC );
 
-    if ($col_def->{DATA_TYPE} eq 'date') {
+    if ($col_def->data_type eq 'date') {
         return $dt->ymd('-');
     }
     else {

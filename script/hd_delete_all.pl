@@ -25,7 +25,7 @@ sub main {
         $dbh->do(q{SET FOREIGN_KEY_CHECKS = 0});
         for my $table ( keys %$inserted ) {
             my $ids = $inserted->{$table};
-            my $table_def = Test::HandyData::mysql::TableDef->new($dbh, $table);
+            my $table_def = Test::HandyData::mysql::TableDef->new( dbh => $dbh, table_name => $table);
             my $pk_column = $table_def->pk_columns()->[0];
             
             my $sth = $dbh->prepare(qq{DELETE FROM $table WHERE $pk_column = ?});
