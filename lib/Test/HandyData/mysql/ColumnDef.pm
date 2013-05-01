@@ -9,43 +9,33 @@ use Data::Dumper;
 
 =head1 NAME
 
-<Module::Name> - <One line description of module's purpose>
+Test::HandyData::mysql::ColumnDef - Manages one column definition 
 
 
 =head1 VERSION
 
-The initial template usually just has:
-
-This documentation refers to <Module::Name> version 0.0.1
+This documentation refers to Test::HandyData::mysql::ColumnDef version 0.0.1
 
 
 =head1 SYNOPSIS
 
-    use <Module::Name>;
-    # Brief but working code example(s) here showing the most common usage(s)
- 
-    # This section will be as far as many users bother reading
-    # so make it as educational and exemplary as possible.
+    use Test::HandyData::mysql::ColumnDef;
+    
+    my $cd = Test::HandyData::mysql::ColumnDef->new('colname', %column_definition);
 
+    #  true if 'colname' is auto_increment
+    my $res = $cd->is_auto_increment();
+    
+    #  get column type 
+    my $type = $cd->data_type();
+    
 
 =head1 DESCRIPTION
 
-A full description of the module and its features.
-May include numerous subsections (i.e. =head2, =head3, etc.) 
+This class is a container of column definition retrieved from information_schema.columns.
 
 
 =head1 METHODS 
-
-A separate section listing the public components of the module's interface. 
-These normally consist of either subroutines that may be exported, or methods
-that may be called on objects belonging to the classes that the module provides.
-Name the section accordingly.
-
-In an object-oriented module, this section should begin with a sentence of the 
-form "An object of this class represents...", to give the reader a high-level
-context to help them understand the methods that are subsequently described.
-
-
 
 
 =head2 new($colname, %params)
@@ -84,9 +74,20 @@ sub new {
 }
 
 
+=head2 name()
+
+Returns column name.
+
+=cut
 
 sub name { shift->{name}; }
 
+
+=head2 is_auto_increment()
+
+Returns 1 if the column is auto_increment. Otherwise returns 0.
+
+=cut
 
 sub is_auto_increment {
     my ($self) = @_;
@@ -94,6 +95,16 @@ sub is_auto_increment {
     return ( $self->{EXTRA} =~ /auto_increment/ ) ? 1 : 0;
 }
 
+
+=head2 To retrieve other attributes
+
+information_schema.columns has many attributes. You can retrieve one of them by using a method which name corresponds to attribute name in lowercase.
+
+For example, you can retrieve 'DATA_TYPE' like this:
+
+    $type = $column_def->data_type();
+
+=cut
 
 sub AUTOLOAD {
     my ($self) = @_;
