@@ -28,11 +28,9 @@ use Class::Accessor::Lite (
     rw      => [
         'dbh',          #  Database handle
         'fk',           #  1: Creates record on other table referenced by main table
-        'nonull',       #  1: Assigns values to columns even if those default is NULL.      
     ],
     ro      => [
         'inserted',     #  All inserted ids
-
         'defs',         #  Table definitions
                         #    $self->defs->{ $table_name } = (Test::HandyData::mysql::TableDef object)
     ],
@@ -82,98 +80,132 @@ my %VALUE_DEF_FUNC = (
 
 
 =head1 NAME
- 
-Test::HandyData::mysql - Generates handy test data for mysql 
- 
- 
+
+Test::HandyData::mysql - Generates test data for mysql easily.
+
+
 =head1 VERSION
- 
+
 This documentation refers to Test::HandyData::mysql version 0.0.1
- 
- 
+
+
 =head1 SYNOPSIS
 
     use DBI;
     use Test::HandyData::mysql;
-   
+       
     my $dbh = DBI->connect('dbi:mysql:test', 'user', 'pass');
-
-    my $handy = Test::HandyData::mysql->new( fk => 1 );
-    $handy->dbh($dbh);
     
+    my $hd = Test::HandyData::mysql->new( fk => 1 );
+    $hd->dbh($dbh);
+     
     
     #  -- table definitions --
     #
-    #  create table table1 (
-    #      id           integer primary key auto_increment,
-    #      group_id     interger not null,
-    #      name         varchar(20) not null,
-    #      price        integer not null,
-    #      constraint foreign key group_id references group(id)
-    #  );
-    #  
-    #  create table group (
+    #  create table category (
     #      id           integer primary key,
     #      name         varchar(20) not null
     #  ); 
     #
-
-
-    #
+    #  create table item (
+    #      id           integer primary key auto_increment,
+    #      category_id  interger not null,
+    #      name         varchar(20) not null,
+    #      price        integer not null,
+    #      constraint foreign key (category_id) references category(id)
+    #  );
+    
+    
+    #  1.
     #  Insert one row to 'table1'.
-    #  'group_id', 'name' and 'price' will be random values.
-    #  'group_id' refers to group(id), so the value will be selected one of ids in table 'group'.
-    #  If table 'group' has no record, new record will be generated on 'group'. 
+    #  'category_id', 'name' and 'price' will be random values.
+    #  table1.group_id refers to group.id, so the value will be selected one of values in group.id.
+    #  If table 'group' has no record, new record will be added to 'group'. 
+    
+    my $id = $hd->insert('table1');
+    
+    #  Result example:
+    #  [item]
+    #           id: 1
+    #  category_id: 497364651
+    #         name: name_1
+    #        price: 597348646
     #
-    $handy->insert('table1');
+    #  [category]
+    #           id: 497364651
+    #         name: name_497364651
+    #    
+    
+    print "ID: $id\n";      #  'ID: 1'
     
         
-    #
-    #  Insert one row to 'table1' with name = 'Banana'
-    #  group_id and price will be random values. 
-    #
-    $handy->insert('table1', { name => 'Banana' });
+    #  2.
+    #  Insert one row to 'item' with name = 'Banana'
+    #  category_id and price will be random values. 
     
+    $id = $hd->insert('item', { name => 'Banana' });  #  Maybe $id == 2
     
+    #  Result example:
+    #  [item]
+    #           id: 2
+    #  category_id: 497364651
+    #         name: Banana
+    #        price: 337640949
     #
-    #  Insert one row to 'table1' with group_id one of 10, 20 or 30 (selected randomly)  
-    #  If table 'group' has no record with id = 10, 20 nor 30, 
-    #  3 records having those ids will be generated on 'group'.
+    #  [category]
+    #           id: 497364651
+    #         name: name_497364651
+    
+     
+    #  3.      
+    #  Insert one row to 'item' with category_id one of 10, 20 or 30 (selected randomly)  
+    #  If table 'category' has no record with id = 10, 20 nor 30, 
+    #  a record having one of those ids will be generated on 'category'.
+    
+    $hd->insert('item', { category_id => [ 10, 20, 30 ] });
+    
+    #  Result example:
+    #  [item] 
+    #           id: 3
+    #  category_id: 20
+    #         name: name_3
+    #        price: 587323402
     #
-    $handy->insert('table1', { group_id => [ 10, 20, 30 ] });
+    #  [category]
+    #           id: 20
+    #         name: name_20
+    
+   
+    #  Delete all records inserted by $hd
+    
+    $hd->delete_all();     
 
-  
+
 =head1 DESCRIPTION
 
-テスト用のデータを生成し、mysql のテーブルに INSERT します。
+This module generates test data and insert it into mysql tables. You only have to specify values of columns you're really interested in. Other necessary values are generated automatically.
 
-開発初期の動作確認時に、データベーステーブル上の列のうち、テストに関係のある列のみを指定し、他の列はどのような値でも構わないということがよくあります。しかし NOT NULL や FOREIGN KEY などの制約がある場合、関心のないデータ、さらには関心のない他のテーブル上のデータについてすべて指定しなければなりません。これは煩わしいことです。
-
-このモジュールは、関心がある列以外のデータをランダムに生成し、テーブルへレコードを INSERT することを可能にします。また必要であれば、外部参照先のレコードも同時に生成します。
+When we test our product, sometimes we need to create test records, but generating them is a tedious task. We should consider many constraints (not null, foreign key, etc.) and set values to many columns in many tables, even if we want to do small tests, are interested in only a few columns and don't want to care about others. Maybe this module get rid of much of those unnecessary task.
 
 
- 
 =head1 METHODS 
- 
 
-=cut 
 
 =head2 new(%params)
+
+Constructor.
 
 
 =head2 dbh($dbh)
 
-passes database handle
+set a database handle
 
 
-=head2 fk($bool)
+=head2 fk($flag)
 
-creates records on other tables referred by foreign key columns in main table, if necessary.
+also creates records on other tables referred by foreign key columns in main table, if necessary. 
 
-
-=head2 nonull($bool)
-
-assigns values to columns even if those defaults are NULL.
+Default is 0 (doesn't add records to other tables), so if you want to use this functionality, you need to specify 1 explicitly.
 
 
 =cut
@@ -199,43 +231,53 @@ sub _distinct_val {
 }
 
 
-=head2 insert($table, $valspec)
+=head2 insert($table_name, $valspec)
 
-Inserts a record.
+Inserts a record to a table named $table_name.
 
-$valspec is a hashref which keys are columns' names in $table.
+You can specify values of each column(s) with $valspec, a hashref which keys are columns' names in $table_name.
 
+    $hd->insert('table1', {
+        id      => 5,
+        price   => 300
+    });
 
-=item colname => $scalar
+=head3 format
+
+=over 4
+
+=item * colname => $scalar
 
 specifies a value of 'colname'
 
-    $handy->insert('table1', { id => 5 });      #  id is 5
+    $handy->insert('table1', { id => 5 });      #  id will become 5
 
 
-=item colname => [ $val1, $val2, ... ]
+=item * colname => [ $val1, $val2, ... ]
 
 value of 'colname' is decided as one of $val1, $val2, ... randomly.
 
-    $handy->insert('table1', { id => [ 10, 20, 30 ] })      #  id is one of 10, 20, 30
+    $handy->insert('table1', { id => [ 10, 20, 30 ] })      #  id will become one of 10, 20 or 30
 
 
-=item colname => { random => [ $val1, $val2, ... ] }
+=item * colname => { random => [ $val1, $val2, ... ] }
 
 verbose expression of above
 
+=back
 
-=item colname => { fk => 1 }
+=head3 column name
 
-creates records on other tables referred by foreign key columns in main table, if necessary. (Overrides object's "fk" attribute)
+If you want to specify values of other tables (maybe referenced by foreign key), join table name and column name with dot(.)
 
+    $valspec = {
+        column1                  => 50,           #  Column in the same table
+        'another_table.column2'  => [10, 20, 30]  #  Column in referenced table
+    }
 
-=item colname => { nonull => $bool }
+=head3 return value
 
-assigns/doesn't assign value to the column even if its default is NULL. (Overrides object's "nonull" attribute)
-
-    $handy->insert('table1', { group_id => { random => [ 10, 20, 30 ], fk => 1, nonull => 1 } });
-
+Returns a value of primary key. (Only when primary key exists and it contains only a single column. Otherwise returns undef.)
 
 =cut
 
@@ -250,26 +292,25 @@ sub insert {
 
 
 
-#  1つのテーブルに1レコードを追加する。
-#  戻り値は、INSERT されたレコードの ID。
 sub process_table {
     my ($self, $table, $tmpl_valspec) = @_;
     my $dbh = $self->dbh();
 
-    #  条件の追加指定があればそれを読み込む
+    #  Reads an additional spec
     $tmpl_valspec 
         and $self->_add_user_valspec($table, $tmpl_valspec);
 
 
     my $table_def = $self->_table_def($table);
 
-    #  ID 列の決定
-    #  $exp_id : 事前に予測されるID。ユーザ指定があればその値、ユーザ指定がなく auto_increment であれば、AUTO_INCREMENT の値。
-    #  $real_id : 実際に割り当てられたID。ユーザ指定があればその値になるが、auto_increment の場合は undef
+    #  Determines ID value.
+    #  $exp_id  : Expected ID. User specified value if specified, or auto_increment value if auto_increment column.
+    #  $real_id : User specified value if specified. Otherwise undef.
     my ($exp_id, $real_id) = $self->get_id($table, $tmpl_valspec);
     debugf("id is (" . ($exp_id || '(undef)') . ", " . ($real_id || '(undef)') . ")");
     
-    #  値を指定する必要のある列を抽出する
+
+    #  columns to which we need to specify values.
     my @colnames = $self->get_cols_requiring_value($table, $table_def->def);
 
 
@@ -279,7 +320,7 @@ sub process_table {
 
         my $value;
     
-        #  (1)PK、かつ値の指定が明示的にされている場合は、それを使う。
+        #  (1)Primary key, and a value is specified by user.
         if ( $table_def->is_pk($col) and $real_id ) {
             $values{$col} = $real_id;
             next;
@@ -289,8 +330,7 @@ sub process_table {
             or confess "No column def found. $col";
 
 
-        #  (2)外部キー制約の有無を確認(fk = 1 のときのみ)
-        #  制約がある場合は、参照先テーブルにあるレコードの値を見て自身の値を決定する。
+        #  (2)If $self->fk = 1 and the column is a foreign key.
         if ( $self->fk ) {
             if ( my $referenced_table_col = $table_def->is_fk($col) ) {     #  ret = { table => 'table name, column => 'column name' }
                 if ( ref $referenced_table_col eq 'HASH' ) { 
@@ -302,19 +342,19 @@ sub process_table {
             }
         }
 
-        #  (2.5)default値が指定されている場合はそれを使う
+        #  (2.5)If column default is available, use it.
         if ( !defined($value) and defined($col_def->column_default) ) {
             $value = $col_def->column_default;
         }            
 
 
-        #  (3)列に値決定のルールが設定されていればそれを使う
+        #  (3)If user specified a value, use it.
         if ( !defined($value) and my $valspec_col = $self->_valspec()->{$table}{$col} ) {
             $value = $self->determine_value( $valspec_col );
         }
         
 
-        #  (4)ルールが設定されていなければ、ランダムに値を決定する
+        #  (4)Otherwise, decide a value randomly.
         if ( !defined($value) ) {
 
             my $type = $col_def->data_type;
@@ -382,7 +422,7 @@ sub _valspec {
 }
 
 
-#  insert したレコードのID をテーブルごとに分類して登録する
+#  Records an ID of inserted record.
 sub add_inserted_id {
     my ($self, $table, $id) = @_;
 
@@ -395,7 +435,7 @@ sub add_inserted_id {
 
 
 
-#  ルールにしたがって列値を決定する
+#  Determine a value of column according to (user-specified) rules.
 sub determine_value {
     my ($self, $valspec_col) = @_;
 
@@ -428,8 +468,8 @@ sub determine_value {
 }
 
 
-#  特定テーブルの中に、特定の列値を持つレコードがあるか調べる。
-#  戻り値は件数。
+#  Check if a record with specified column value exists.
+#  Return value is a count of record(s).
 sub _value_exists_in_table_col {
     my ($self, $table, $col, $value) = @_;
 
@@ -762,7 +802,7 @@ sub _val_year {
 }
 
 
-=pod _get_current_distinct_values($table, $col)
+=cut _get_current_distinct_values($table, $col)
 
 $table, $col で指定された表・列の値(distinct値)を一定個数取得する。
 
@@ -801,7 +841,7 @@ sub _get_current_distinct_values {
 }
 
 
-=pod _set_user_valspec($table_name, $valspec)
+=cut _set_user_valspec($table_name, $valspec)
 
 insert を実行するときの条件を設定する。
 (これまで設定していた条件はクリアされる)
@@ -819,7 +859,7 @@ sub _set_user_valspec {
 }
 
 
-=pod _add_user_valspec($table, $table_valspec)
+=cut _add_user_valspec($table, $table_valspec)
 
 次回 insert を実行したときの条件を設定する。
 (これまで設定していた条件に追加する)
@@ -886,13 +926,28 @@ sub _add_user_valspec {
 }   
 
 
+=head2 inserted()
+
+Returns all primary keys of inserted records by this instance. Return value is a hashref like this:
+
+    my $ret = $hd->inserted();
+    
+    #  $ret = {
+    #    'table_name1' => [ 10, 11 ],
+    #    'table_name2' => [ 100, 110, 120 ],
+    #  };
+
+CAUTION: inserted() ignores records with no primary key, or primary key with multiple columns.
+
+=cut
+
+
 
 =head2 delete_all()
 
 deletes all rows inserted by this instance.
 
-CAUTION: delete_all() won't delete rows in tables which don't have primary key.
-
+CAUTION: delete_all() won't delete rows in tables which don't have primary key, or which have primary key with multiple columns.
 
 =cut
 
@@ -932,7 +987,7 @@ sub _check_fk_check_status {
 }
 
 
-=pod _add_record_if_not_exist($table, $col, $value)
+=cut _add_record_if_not_exist($table, $col, $value)
 
 Inserts a record only if record(s) which value of column $col is $value doesn't exist.
 
@@ -954,67 +1009,57 @@ sub _add_record_if_not_exist {
 __END__
 
 =head1 DIAGNOSTICS
- 
+
 A list of every error and warning message that the module can generate
 (even the ones that will "never happen"), with a full explanation of each 
 problem, one or more likely causes, and any suggested remedies.
 (See also  QUOTE \" " INCLUDETEXT "13_ErrorHandling" "XREF83683_Documenting_Errors_"\! Documenting Errors QUOTE \" " QUOTE " in Chapter "  in Chapter  INCLUDETEXT "13_ErrorHandling" "XREF40477__"\! 13.)
- 
- 
+
+
 =head1 CONFIGURATION AND ENVIRONMENT
- 
+
 A full explanation of any configuration system(s) used by the module,
 including the names and locations of any configuration files, and the
 meaning of any environment variables or properties that can be set. These
 descriptions must also include details of any configuration language used.
 (also see  QUOTE \" " INCLUDETEXT "19_Miscellanea" "XREF40334_Configuration_Files_"\! Configuration Files QUOTE \" " QUOTE " in Chapter "  in Chapter  INCLUDETEXT "19_Miscellanea" "XREF55683__"\! 19.)
- 
- 
+
+
 =head1 DEPENDENCIES
- 
+
 A list of all the other modules that this module relies upon, including any
 restrictions on versions, and an indication whether these required modules are
 part of the standard Perl distribution, part of the module's distribution,
 or must be installed separately.
- 
- 
+
+
 =head1 INCOMPATIBILITIES
- 
+
 A list of any modules that this module cannot be used in conjunction with.
 This may be due to name conflicts in the interface, or competition for 
 system or program resources, or due to internal limitations of Perl 
 (for example, many modules that use source code filters are mutually 
 incompatible).
- 
- 
+
+
 =head1 BUGS AND LIMITATIONS
- 
-A list of known problems with the module, together with some indication
-whether they are likely to be fixed in an upcoming release.
- 
-Also a list of restrictions on the features the module does provide: 
-data types that cannot be handled, performance issues and the circumstances
-in which they may arise, practical limitations on the size of data sets, 
-special cases that are not (yet) handled, etc.
- 
-The initial template usually just has:
- 
+
 There are no known bugs in this module. 
 Please report problems to <Maintainer name(s)>  (<contact address>)
 Patches are welcome.
- 
+
 =head1 AUTHOR
- 
-Takashi Egawa  (egawa.takashi@gmail.com)
- 
- 
+
+Egawata C<< <egawa.takashi@gmail.com> >>
+
+
 =head1 LICENCE AND COPYRIGHT
- 
-Copyright (c) 2012 Takashi Egawa (egawa.takashi@gmail.com). All rights reserved.
- 
+
+Copyright (c)2012-2013 Egawata C<< <egawa.takashi@gmail.com> >>. All rights reserved.
+
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself. See L<perlartistic>.
- 
+
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. 
