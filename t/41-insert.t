@@ -37,6 +37,9 @@ sub main {
     test_notnull_nofk($hd);
     test_notnull_default_fk($hd);
     test_notnull_nodefault_fk($hd);
+    test_error($hd);
+    test_nopk($hd);
+    test_pk2($hd);
 
 
     $dbh->disconnect();
@@ -327,8 +330,68 @@ sub _check_row_count {
 
 
 
+sub test_error {
+    my ($hd) = @_;
+    my $dbh = $hd->dbh;
 
+    $dbh->do(q{
+        CREATE TABLE test_error1 (
+            id integer
+        )
+    });
+
+    #  table 'test_error2' does not exist.
+    dies_ok { $hd->insert('test_error2', { id => 'a' }) };
+}
+
+
+sub test_nopk {
+    my ($hd) = @_;
     
+    my $dbh = $hd->dbh;
+    
+    $dbh->do(q{
+        CREATE TABLE test_pk0 (
+            col1 varchar(10),
+            col2 varchar(10) not null
+        )
+    });
+    
+    my $id = $hd->insert('test_pk0', { col1 => 'abc' });
+    is($id, undef);
+    
+    my $row = $dbh->selectrow_hashref(q{
+                SELECT * FROM test_pk0 LIMIT 1
+            });
+    is($row->{col1}, 'abc');
+    like($row->{col2}, qr/^\w+$/);
+}
+
+
+sub test_pk2 {
+    my ($hd) = @_;
+    my $dbh = $hd->dbh;
+
+    $dbh->do(q{
+        CREATE TABLE test_pk2 (
+            id1 integer,
+            id2 integer,
+            col1 varchar(10) not null,
+            PRIMARY KEY (id1, id2)
+        )
+    });
+    
+    my $id = $hd->insert('test_pk2', {});
+    is($id, undef);
+    
+    my $row = $dbh->selectrow_hashref(q{
+                SELECT * FROM test_pk2 LIMIT 1
+            });
+    like($row->{id1}, qr/^\d+$/);
+    like($row->{id2}, qr/^\d+$/);
+    like($row->{col1}, qr/^\w+$/);
+}
+
 
 
 

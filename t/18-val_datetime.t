@@ -37,6 +37,7 @@ sub main {
     test_datetime($hd, 'datetime');
     test_datetime($hd, 'timestamp');
     test_date($hd);
+    test_year($hd);
 
     $dbh->disconnect();
 
@@ -98,6 +99,29 @@ sub test_date {
 }
 
     
-    
+sub test_year {
+    my ($hd) = @_;
+    my $dbh = $hd->dbh;
+
+    $dbh->do(q{
+        CREATE TABLE test_year (
+            value year not null
+        )
+    });
+
+    my $col_def = $hd->_table_def('test_year')->column_def('value');
+
+    my @sample = ();
+    my @failed = ();
+    for ( 1..$NUM_TESTS ) {
+        my $ret = $hd->_val_year($col_def);
+        push @failed, $ret unless $ret =~ m/^\d{4}$/ or @failed > $NUM_SAMPLES;
+        push @sample, $ret if $_ <= $NUM_SAMPLES;
+    }
+    my $message = (@failed) ? "year failed = " . (join ', ', map { qq{'$_'} } @failed)
+                            : "year samples = " . (join ', ', map { qq{'$_'} } @sample)
+                            ;
+    is(scalar(@failed), 0, $message);
+}
 
 

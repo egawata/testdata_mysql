@@ -11,6 +11,11 @@ our $VERSION = '0.0.1';
 our $FLOAT_PRECISION = 4;
 our $FLOAT_SCALE     = 2;
 
+our $DISTINCT_VAL_FETCH_LIMIT = 100;
+
+our $RANGE_YEAR_YEAR = 20;
+our $RANGE_YEAR_DATETIME = 2;
+
 
 use DBI;
 use Data::Dumper;
@@ -59,9 +64,11 @@ my $LENGTH_LIMIT_VARCHAR     = 20;
 my %VALUE_DEF_FUNC = (
     char        => \&_val_varchar,
     varchar     => \&_val_varchar,
+    text        => \&_val_varchar,
     tinyint     => \&_val_tinyint,
     smallint    => \&_val_smallint,
     int         => \&_val_int,
+    integer     => \&_val_int,
     bigint      => \&_val_int,
     numeric     => \&_val_numeric,
     decimal     => \&_val_numeric,
@@ -70,9 +77,8 @@ my %VALUE_DEF_FUNC = (
     datetime    => \&_val_datetime,
     timestamp   => \&_val_datetime,
     date        => \&_val_datetime,
+    year        => \&_val_year,
 );
-
-our $DISTINCT_VAL_FETCH_LIMIT = 100;
 
 
 =head1 NAME
@@ -312,8 +318,13 @@ sub process_table {
         if ( !defined($value) ) {
 
             my $type = $col_def->data_type;
-            my $func = $VALUE_DEF_FUNC{$type}
-                or die "Type $type for $col not supported";
+            my $func = $VALUE_DEF_FUNC{$type};
+
+            #  If this data type is not supported, leave it NULL.
+            unless ($func) {
+                warn "Type $type for $col is not supported.";
+                next;
+            }
             
             $value = $self->$func($col_def, $exp_id);
             debugf("No rule found. Generates random value.($value)");
@@ -733,7 +744,7 @@ sub _val_float {
 sub _val_datetime {
     my ($self, $col_def) = @_;
 
-    my $dt = DateTime->from_epoch( epoch => time + rand() * 2 * $ONE_YEAR_SEC - $ONE_YEAR_SEC );
+    my $dt = DateTime->from_epoch( epoch => time + rand() * $RANGE_YEAR_DATETIME * $ONE_YEAR_SEC - $ONE_YEAR_SEC );
 
     if ($col_def->data_type eq 'date') {
         return $dt->ymd('-');
@@ -743,6 +754,12 @@ sub _val_datetime {
     }
 }
 
+
+sub _val_year {
+    my $dt = DateTime->from_epoch( epoch => time + rand() * $RANGE_YEAR_YEAR * $ONE_YEAR_SEC - $ONE_YEAR_SEC );
+
+    return $dt->year();
+}
 
 
 =pod _get_current_distinct_values($table, $col)
