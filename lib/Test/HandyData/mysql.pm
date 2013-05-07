@@ -117,12 +117,12 @@ This documentation refers to Test::HandyData::mysql version 0.0.1
     
     
     #  1.
-    #  Insert one row to 'table1'.
+    #  Insert one row to 'item'.
     #  'category_id', 'name' and 'price' will be random values.
-    #  table1.group_id refers to group.id, so the value will be selected one of values in group.id.
-    #  If table 'group' has no record, new record will be added to 'group'. 
+    #  category_id refers to category.id, so the value will be selected one of values in category.id.
+    #  If table 'category' has no record, new record will be added to 'category'. 
     
-    my $id = $hd->insert('table1');
+    my $id = $hd->insert('item');
     
     #  Result example:
     #  [item]
@@ -177,8 +177,10 @@ This documentation refers to Test::HandyData::mysql version 0.0.1
     
    
     #  Delete all records inserted by $hd
-    
     $hd->delete_all();     
+    
+    #  ...Or retrieve all IDs for later deletion.
+    my $ids = $hd->inserted();
 
 
 =head1 DESCRIPTION
@@ -502,15 +504,19 @@ sub determine_fk_value {
         debugf("Value is specified. : " . Dumper($valspec_col));
 
         # 
-        #  (1)値の決定方法に指定がある場合は、その方法により値を決定する。
+        #  (1)If a rule of determining the value is specified by user, apply the rule.
         #
         $value = $self->determine_value( $valspec_col );
 
-        #  その値を持つレコードが参照先テーブルになければ、参照先にその値を持つレコードを新たに作成
+        #  If a referenced record does not exist in a referenced table, 
+        #  insert a record having the value at first.
         #  
-        #  参照先テーブルの内容を毎回問い合わせるのは効率が悪いと考えたが、
-        #  参照先のレコード数が大量の場合はメモリを浪費してしまうことも考慮し、
-        #  あえて毎回問い合わせることにした。
+        #  * I haven't thought it would be efficient to query every time which values
+        #    in a given column in a referenced table exist. At first I used to believe
+        #    it would be a good idea to query only for the first time, and cache those values
+        #    for later use. But I suspected it wouldn't be a good idea. Sometimes the number of values
+        #    becomes very huge, requiring big memory space. Furthermore, those values may change.
+        #    So I've changed my mind to query current values every time.
         $self->_add_record_if_not_exist($ref_table, $ref_col, $value);
 
     }
@@ -524,16 +530,17 @@ sub determine_fk_value {
         debugf("No value is specified. Trying to retrieve list of ids from $ref_table");
 
         #
-        #  (2)値の決定方法にユーザ指定がない場合
+        #  (2)Case when no rule for the value definition specified by user
         #
 
-        #  現在参照先テーブルにあるPK値を取得する
-        #  結果は 
-        #  $ref_ids => { (id1)  => 1, (id2) => 1, ... }  という形で取得される。
+        #  Retrieve values of primary key in the referenced table.
+        #  Its result is like...
+        #  $ref_ids => { (id1)  => 1, (id2) => 1, ... }
+        #
         my $ref_ids = $self->_get_current_distinct_values($ref_table, $ref_col); 
     
 
-        #  現存する参照先の値から1つ適当に選ぶ(1レコード以上ある場合)
+        #  Pick up one of referenced values randomly, if at least one record exists.
         my @_ref_ids = keys %$ref_ids;
         if ( @_ref_ids ) {
             $value = $_ref_ids[ int(rand() * scalar(@_ref_ids)) ];
@@ -541,9 +548,9 @@ sub determine_fk_value {
 
         }
         else {
-            #  参照先にはまだレコードがないので、適当に作成   
-            $value = $self->process_table($ref_table);      #  IDを指定していないので適当な値がIDになるはず
-            $self->_distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  このIDを追加しておく
+            #  No record found in the referenced table, so insert here.
+            $value = $self->process_table($ref_table);      #  ID value would be determined randomly.
+            $self->_distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  Add the ID value
             debugf("Referenced record created. id = $value");
             
         }
@@ -554,9 +561,15 @@ sub determine_fk_value {
 }
 
 
-#  ID 列の値を決定する
-#  ここでは exp_id(予測されるID列の値)と real_id(ID列の確定値)の2つを返している。
-#  TODO: 現状、単一列、整数値にしか対応していない
+#  Determines ID value.
+#  Returns 2 values. One if exp_id(expected ID), which is used to determine column values
+#  other than primary key (for example, when expected id is 4001, values of column named 'foo'
+#  will be 'foo_4001' if possible.
+#  Another is real_id, which is a final value of ID column. It may be undef if no value is 
+#  specified by user.
+#  
+#  TODO: Currently it works properly only when primary key consists of one column, 
+#  and its type is integer.
 sub get_id {
     my ($self, $table) = @_;
 
@@ -569,34 +582,34 @@ sub get_id {
         my $col_def = $table_def->column_def($col);
         
 
-        #  呼び出し元から指定された条件があり、それによりPKの値を決定できるか確かめる。
-        #  決定できる場合は $real_id にその値が入る。
+        #  Verifies if PK value can be determined by the user-specified rule.
+        #  If possible, $real_id will be a value determined by the rule.
         if (    $self->_valspec()->{$table} 
                 and $self->_valspec()->{$table}{$col} 
                 and $real_id = $self->determine_value( $self->_valspec()->{$table}{$col} ) 
         ) 
         {
 
-            #  呼び出し元から指定された条件があればそれに従う
+            #  exp_id will be the same of real_id when user-specified rule exists.
             $exp_id = $real_id;
 
         }
         else {
 
-            #  特に指定がない場合
+            #  When no user-rule specified
             debugf("user value is not specified");
 
             if ( $col_def->is_auto_increment() ) {
 
-                #  auto_increment が設定されていればそれに従う
+                #  If the PK has auto_increment attribute, retrieve a value from it.
                 debugf("Column $col is an auto_increment");
                 $exp_id = $table_def->get_auto_increment_value();
                 
-                #  real_id は insert 時に決まるため、undef のままにしておく。
+                #  real_id won't be determined until insert operation executes, so leaves it undef.
 
             }
             else {
-                #  なければランダムな値を生成する。
+                #  There's no auto_increment attribute, so generates random value and uses it as a value of primary key.
                 debugf("Column $col is not an auto_increment");
                 my $type = $col_def->data_type;
                 my $size = $col_def->character_maximum_length;
@@ -614,7 +627,7 @@ sub get_id {
 
 
 
-#  INSERT 実行時に値を指定する必要のある列のみ抽出する
+#  Make a list of columns which need a value at an insert operation.
 sub get_cols_requiring_value {
     my ($self, $table) = @_;
 
@@ -623,21 +636,30 @@ sub get_cols_requiring_value {
     my @cols = ();
     for my $col ( $table_def->colnames ) {
 
-        #  ユーザから値の指定がある場合は、必ずそれを使って指定する。
-        #  なければ、列定義により、指定の要否を決める。
+        #  When user specifies a rule of determining value, uses it every time.
+        #  If not, checks if any column definition (like 'auto_increment') can be used
+        #  as a rule.
         unless ( defined( $self->_valspec()->{$table}{$col} ) ) {
 
             my $col_def = $table_def->column_def($col);
 
-            #  auto_increment 列は指定の必要なし
+            #  we do not need to specify a value of auto_increment column. Skip it.
             next if $col_def->is_auto_increment;
 
-            #  default 値が指定されている場合はそれを使用するので、指定の必要なし
-            #  XXX: default値あり、かつfk制約がある場合に上手く動かないので、
-            #       default値がある場合であっても明示的に指定するようにする。
+            #
+            #  I used to believe that DEFAULT value could be used if exists, so 
+            #  I should skip the column having DEFAULT value.
+            #  But I found it wouldn't work properly when the column has
+            #  foreign key constraint too, because it seemes there would be 
+            #  no way to add a record to referenced table.
+            #  So I've changed the way assuming the user rule would be specified
+            #  as the DEFAULT value.
+            #  
+            #  Commented out the line below.
+
             #next if defined($col_def->column_default);
 
-            #  NULL 値が認められているのであれば指定しない
+            #  When NULL value is accetable, skip the column.
             next if $col_def->is_nullable eq 'YES';
 
         }
@@ -804,7 +826,8 @@ sub _val_year {
 
 =cut _get_current_distinct_values($table, $col)
 
-$table, $col で指定された表・列の値(distinct値)を一定個数取得する。
+Returns some distinct values in the specified $table and specified $col.
+
 
 
 =cut
@@ -822,7 +845,6 @@ sub _get_current_distinct_values {
     #my $current = $self->_distinct_val()->{$table}{$col};
     #if ( !defined $current or keys %$current == 0 ) {
 
-        #  現存するレコードを確認
         #  SELECT DISTINCT $col FROM $table LIMIT $DISTINCT_VAL_FETCH_LIMIT;
         my $select = $self->_sql_maker->new_select(distinct => 1);
         my ($sql, @bind) = $select->add_select($col)
@@ -843,9 +865,9 @@ sub _get_current_distinct_values {
 
 =cut _set_user_valspec($table_name, $valspec)
 
-insert を実行するときの条件を設定する。
-(これまで設定していた条件はクリアされる)
+Specifies user-defined rules for determining values of columns.
 
+Previous rules will be cleared.
 
 =cut
 
@@ -861,8 +883,9 @@ sub _set_user_valspec {
 
 =cut _add_user_valspec($table, $table_valspec)
 
-次回 insert を実行したときの条件を設定する。
-(これまで設定していた条件に追加する)
+Specifies user-defined rules for determining values of columns.
+
+Previous rules will remain and new rules will be added.
 
 =cut
 
@@ -1008,54 +1031,42 @@ sub _add_record_if_not_exist {
 
 __END__
 
-=head1 DIAGNOSTICS
-
-A list of every error and warning message that the module can generate
-(even the ones that will "never happen"), with a full explanation of each 
-problem, one or more likely causes, and any suggested remedies.
-(See also  QUOTE \" " INCLUDETEXT "13_ErrorHandling" "XREF83683_Documenting_Errors_"\! Documenting Errors QUOTE \" " QUOTE " in Chapter "  in Chapter  INCLUDETEXT "13_ErrorHandling" "XREF40477__"\! 13.)
-
-
-=head1 CONFIGURATION AND ENVIRONMENT
-
-A full explanation of any configuration system(s) used by the module,
-including the names and locations of any configuration files, and the
-meaning of any environment variables or properties that can be set. These
-descriptions must also include details of any configuration language used.
-(also see  QUOTE \" " INCLUDETEXT "19_Miscellanea" "XREF40334_Configuration_Files_"\! Configuration Files QUOTE \" " QUOTE " in Chapter "  in Chapter  INCLUDETEXT "19_Miscellanea" "XREF55683__"\! 19.)
-
-
-=head1 DEPENDENCIES
-
-A list of all the other modules that this module relies upon, including any
-restrictions on versions, and an indication whether these required modules are
-part of the standard Perl distribution, part of the module's distribution,
-or must be installed separately.
-
-
-=head1 INCOMPATIBILITIES
-
-A list of any modules that this module cannot be used in conjunction with.
-This may be due to name conflicts in the interface, or competition for 
-system or program resources, or due to internal limitations of Perl 
-(for example, many modules that use source code filters are mutually 
-incompatible).
-
 
 =head1 BUGS AND LIMITATIONS
 
-There are no known bugs in this module. 
-Please report problems to <Maintainer name(s)>  (<contact address>)
+There are still many limitations with this module. I'll fix them later.
+
+=head3 Only primary key with single column supported.
+
+It works even when trying to insert a record into a table which primary key consists of multiple columns. However, C<< insert >> won't return a value of primary key just inserted.
+
+
+=head3 Foreign key constraint which has multiple columns is not supported.
+
+For now, if you want to use this module with such a table, specify those values explicitly.
+
+
+=head3 Multiple foreign key constraints to the same column are not supported.
+
+For now, if you want to use this module with such a table, specify those values explicitly.
+
+
+=head3 Some types are not supported.
+
+For example, blob or set aren't supported. The values of those columns won't be auto-generated.
+
+
+Please report problems to Egawata C<< (egawa.takashi at gmail com) >>
 Patches are welcome.
 
 =head1 AUTHOR
 
-Egawata C<< <egawa.takashi@gmail.com> >>
+Egawata C<< <egawa.takashi at gmail com> >>
 
 
 =head1 LICENCE AND COPYRIGHT
 
-Copyright (c)2012-2013 Egawata C<< <egawa.takashi@gmail.com> >>. All rights reserved.
+Copyright (c)2012-2013 Egawata C<< <egawa.takashi at gmail com> >>. All rights reserved.
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself. See L<perlartistic>.

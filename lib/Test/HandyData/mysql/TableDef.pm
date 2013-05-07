@@ -30,10 +30,14 @@ This documentation refers to Test::HandyData::mysql::TableDef version 0.0.1
 
 
 
+=head1 CAUTION
+
+This module is not intended for use outside Test::HandyData. Its interface may be changed in the future.
+
 
 =head1 DESCRIPTION
 
-Mysql におけるテーブル定義を管理するクラス。
+This module manages a table definition in one table in Mysql.
 
 
 =head1 METHODS 
@@ -345,8 +349,7 @@ sub column_def {
 
 =head2 get_auto_increment_value()
 
-auto_increment が次に生成する値を取得する。
-
+Returns a value which auto_increment will generate next time.
 
 =cut
 
@@ -369,14 +372,13 @@ sub get_auto_increment_value {
 
 
 #
-#  指定されたテーブルのテーブル定義を取得する。
-#  結果は
+#  Returns a set of a specified table definition.
+#  Result values is a hashref like:
 #  　$res = {
-#      (colname1) => (information_schema のレコード),
-#      (colname2) => (  同上 ),
+#      (colname1) => (a record in information_schema),
+#      (colname2) => (same as above),
 #      ..
 #    }
-#  のような形式で返す。 
 #
 sub _get_table_definition {
     my ($self) = @_;
@@ -389,8 +391,8 @@ sub _get_table_definition {
     my $res = {};
     while ( my $ref = $sth->fetchrow_hashref ) {
 
-        #  取得された information_schema 結果のキーは環境により大文字、小文字の両方がありえるので、
-        #  キー名はすべて大文字に変換する。
+        #  Key name may be uppercase or lowercase depending on environment.
+        #  So convert all key names into uppercase.
         my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
 
         my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
@@ -421,45 +423,6 @@ sub _dbname {
 
 __END__
 
-=head1 DIAGNOSTICS
-
-A list of every error and warning message that the module can generate
-(even the ones that will "never happen"), with a full explanation of each 
-problem, one or more likely causes, and any suggested remedies.
-(See also  QUOTE \" " INCLUDETEXT "13_ErrorHandling" "XREF83683_Documenting_Errors_"\! Documenting Errors QUOTE \" " QUOTE " in Chapter "  in Chapter  INCLUDETEXT "13_ErrorHandling" "XREF40477__"\! 13.)
-
-
-=head1 CONFIGURATION AND ENVIRONMENT
-
-A full explanation of any configuration system(s) used by the module,
-including the names and locations of any configuration files, and the
-meaning of any environment variables or properties that can be set. These
-descriptions must also include details of any configuration language used.
-(also see  QUOTE \" " INCLUDETEXT "19_Miscellanea" "XREF40334_Configuration_Files_"\! Configuration Files QUOTE \" " QUOTE " in Chapter "  in Chapter  INCLUDETEXT "19_Miscellanea" "XREF55683__"\! 19.)
-
-
-=head1 DEPENDENCIES
-
-A list of all the other modules that this module relies upon, including any
-restrictions on versions, and an indication whether these required modules are
-part of the standard Perl distribution, part of the module's distribution,
-or must be installed separately.
-
-
-=head1 INCOMPATIBILITIES
-
-A list of any modules that this module cannot be used in conjunction with.
-This may be due to name conflicts in the interface, or competition for 
-system or program resources, or due to internal limitations of Perl 
-(for example, many modules that use source code filters are mutually 
-incompatible).
-
-
-=head1 BUGS AND LIMITATIONS
-
-There are no known bugs in this module. 
-Please report problems to Takashi Egawa.
-Patches are welcome.
 
 =head1 AUTHOR
 
