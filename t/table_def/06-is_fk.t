@@ -7,7 +7,6 @@ use Test::More;
 use Test::Exception;
 use DBI;
 use Test::mysqld;
-use Data::Dumper;
 
 use Test::HandyData::mysql;
 
@@ -119,8 +118,7 @@ sub test_many_fk {
     is_deeply($col1_fk, [ 
         { table => 'foreign3', column => 'id1' },
         { table => 'foreign4', column => 'id2' }
-    ])
-        or diag "is_fk : " . Dumper($col1_fk);
+    ]);
 }
 
 

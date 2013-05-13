@@ -3,6 +3,7 @@ package Test::HandyData::mysql;
 use strict;
 use warnings;
 
+use 5.008;
 our $VERSION = '0.0.1';
 
 
@@ -18,16 +19,15 @@ our $RANGE_YEAR_DATETIME = 2;
 
 
 use DBI;
-use Data::Dumper;
 use DateTime;
 use Carp;
-use Log::Minimal;
 use SQL::Maker;
 use Class::Accessor::Lite (
     new     => 1,
     rw      => [
         'dbh',          #  Database handle
         'fk',           #  1: Creates record on other table referenced by main table
+        'debug'         #  debug mode
     ],
     ro      => [
         'inserted',     #  All inserted ids
@@ -309,7 +309,7 @@ sub process_table {
     #  $exp_id  : Expected ID. User specified value if specified, or auto_increment value if auto_increment column.
     #  $real_id : User specified value if specified. Otherwise undef.
     my ($exp_id, $real_id) = $self->get_id($table, $tmpl_valspec);
-    debugf("id is (" . ($exp_id || '(undef)') . ", " . ($real_id || '(undef)') . ")");
+    $self->_print_debug("id is (" . ($exp_id || '(undef)') . ", " . ($real_id || '(undef)') . ")");
     
 
     #  columns to which we need to specify values.
@@ -369,7 +369,7 @@ sub process_table {
             }
             
             $value = $self->$func($col_def, $exp_id);
-            debugf("No rule found. Generates random value.($value)");
+            $self->_print_debug("No rule found. Generates random value.($value)");
 
         }
 
@@ -382,7 +382,7 @@ sub process_table {
 
     eval {
         my ($sql, @bind) = $self->_sql_maker->insert($table, \%values);
-        debugf($sql .  ", binds [" . (join ', ', @bind) . "]");
+        $self->_print_debug($sql .  ", binds [" . (join ', ', @bind) . "]");
 
         my $sth = $dbh->prepare($sql);
         $sth->execute(@bind);
@@ -400,7 +400,7 @@ sub process_table {
         $inserted_id = $real_id || $dbh->{'mysql_insertid'};
         $self->add_inserted_id($table, $inserted_id);
    
-        debugf("Inserted. table = $table, id = $inserted_id");
+        $self->_print_debug("Inserted. table = $table, id = $inserted_id");
     }
     
     return $inserted_id;
@@ -442,7 +442,7 @@ sub determine_value {
     my ($self, $valspec_col) = @_;
 
     ref $valspec_col eq 'HASH'
-        or confess "Invalid valspec type." . Dumper($valspec_col);
+        or confess "Invalid valspec type." . ref($valspec_col);
 
     my $value;
 
@@ -498,10 +498,10 @@ sub determine_fk_value {
     $table and $col and $ref_table and $ref_col 
         or confess "Invalid args. (requires 3 args)";
 
-    debugf("Column $col is a foreign key references $ref_table.$ref_col.");
+    $self->_print_debug("Column $col is a foreign key references $ref_table.$ref_col.");
 
     if ( my $valspec_col = $self->_valspec()->{$table}{$col} || $self->_valspec()->{$ref_table}{$ref_col} ) {
-        debugf("Value is specified. : " . Dumper($valspec_col));
+        $self->_print_debug("Value is specified.");
 
         # 
         #  (1)If a rule of determining the value is specified by user, apply the rule.
@@ -521,13 +521,13 @@ sub determine_fk_value {
 
     }
     elsif ( my $column_default = $self->_table_def($table)->column_def($col)->column_default ) {
-        debugf("Column default is specified. value = $column_default");
+        $self->_print_debug("Column default is specified. value = $column_default");
         $value = $column_default;
         $self->_add_record_if_not_exist($ref_table, $ref_col, $value);
 
     }
     else {
-        debugf("No value is specified. Trying to retrieve list of ids from $ref_table");
+        $self->_print_debug("No value is specified. Trying to retrieve list of ids from $ref_table");
 
         #
         #  (2)Case when no rule for the value definition specified by user
@@ -544,14 +544,14 @@ sub determine_fk_value {
         my @_ref_ids = keys %$ref_ids;
         if ( @_ref_ids ) {
             $value = $_ref_ids[ int(rand() * scalar(@_ref_ids)) ];
-            debugf("Referenced record id = $value");
+            $self->_print_debug("Referenced record id = $value");
 
         }
         else {
             #  No record found in the referenced table, so insert here.
             $value = $self->process_table($ref_table);      #  ID value would be determined randomly.
             $self->_distinct_val()->{$ref_table}{$ref_col}{$value} = 1;            #  Add the ID value
-            debugf("Referenced record created. id = $value");
+            $self->_print_debug("Referenced record created. id = $value");
             
         }
     }
@@ -597,12 +597,12 @@ sub get_id {
         else {
 
             #  When no user-rule specified
-            debugf("user value is not specified");
+            $self->_print_debug("user value is not specified");
 
             if ( $col_def->is_auto_increment() ) {
 
                 #  If the PK has auto_increment attribute, retrieve a value from it.
-                debugf("Column $col is an auto_increment");
+                $self->_print_debug("Column $col is an auto_increment");
                 $exp_id = $table_def->get_auto_increment_value();
                 
                 #  real_id won't be determined until insert operation executes, so leaves it undef.
@@ -610,7 +610,7 @@ sub get_id {
             }
             else {
                 #  There's no auto_increment attribute, so generates random value and uses it as a value of primary key.
-                debugf("Column $col is not an auto_increment");
+                $self->_print_debug("Column $col is not an auto_increment");
                 my $type = $col_def->data_type;
                 my $size = $col_def->character_maximum_length;
                 my $func = $VALUE_DEF_FUNC{$type}
@@ -693,7 +693,7 @@ sub _val_varchar {
     my ($self, $col_def, $exp_id) = @_;
 
     my $maxlen = $col_def->character_maximum_length;
-    debugf("Maxlen is $maxlen");
+    $self->_print_debug("Maxlen is $maxlen");
 
     if ( defined $exp_id ) {
         my $pk_length = length($exp_id);
@@ -714,13 +714,13 @@ sub _val_varchar {
 
     $maxlen > $LENGTH_LIMIT_VARCHAR 
         and $maxlen = $LENGTH_LIMIT_VARCHAR;
-    debugf("Maxlen is $maxlen");
+    $self->_print_debug("Maxlen is $maxlen");
 
     my $string = '';
     for (1 .. $maxlen) {
         $string .= $VARCHAR_LIST[ int( rand() * $COUNT_VARCHAR_LIST ) ];
     }
-    debugf("Result string is $string");
+    $self->_print_debug("Result string is $string");
 
     return $string;
 
@@ -896,7 +896,7 @@ sub _add_user_valspec {
         or confess "Missing table name";
 
     defined $table_valspec and ref $table_valspec eq 'HASH'
-        or confess "Invalid user valspec. " . Dumper($table_valspec);
+        or confess "Invalid user valspec.";
 
 
     for my $col (keys %$table_valspec) {
@@ -944,8 +944,6 @@ sub _add_user_valspec {
 
     }
 
-    debugf("Valspec is " . Dumper($self->_valspec()));
-
 }   
 
 
@@ -991,7 +989,7 @@ sub delete_all {
         for my $val ( @{ $self->inserted->{$table} } ) {
             my ($sql, @bind) = $self->_sql_maker->delete($table, { $pk_name => $val });
             $dbh->do($sql, undef, @bind);
-            debugf(qq{DELETE FROM `$table` WHERE `$pk_name` = "$val"});
+            $self->_print_debug(qq{DELETE FROM `$table` WHERE `$pk_name` = "$val"});
         }
     }
 
@@ -1021,9 +1019,20 @@ sub _add_record_if_not_exist {
 
     if ( 0 == $self->_value_exists_in_table_col($table, $col, $value) ) {     #  No record exists
         $self->process_table($table, { $col => $value });       #  レコード作成
-        debugf("A referenced record created. id = $value");
+        $self->_print_debug("A referenced record created. id = $value");
     }
 }
+
+
+
+sub _print_debug {
+    my ($self, $message) = @_;
+
+    if ( $self->debug ) {
+        print "$message\n";
+    }
+}
+
 
 1;
 

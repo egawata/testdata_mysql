@@ -7,7 +7,6 @@ use Test::More;
 use Test::Exception;
 use DBI;
 use Test::mysqld;
-use Data::Dumper;
 
 use Test::HandyData::mysql;
 
@@ -169,7 +168,5 @@ sub select_all {
     my $res = $dbh->selectall_arrayref(qq{
         SELECT * FROM $table
     });
-
-    print $table . ':' . Dumper($res);
 
 }   

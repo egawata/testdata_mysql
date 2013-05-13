@@ -4,7 +4,6 @@ use warnings;
 use DBI;
 use Test::mysqld;
 use Test::HandyData::mysql::TableDef;
-use Data::Dumper;
 
 use Test::More;
 

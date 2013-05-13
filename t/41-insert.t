@@ -7,7 +7,6 @@ use Test::More;
 use Test::Exception;
 use DBI;
 use Test::mysqld;
-use Data::Dumper;
 
 use Test::HandyData::mysql;
 
@@ -341,7 +340,7 @@ sub test_error {
     });
 
     #  table 'test_error2' does not exist.
-    dies_ok { $hd->insert('test_error2', { id => 'a' }) };
+    dies_ok { $hd->insert('test_error2', { id => 'a' }) } "(expected error)";
 }
 
 

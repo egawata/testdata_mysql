@@ -4,8 +4,6 @@ use strict;
 use warnings;
 
 use Carp;
-use Data::Dumper;
-use Log::Minimal;
 
 use Test::HandyData::mysql::ColumnDef;
 
@@ -395,7 +393,7 @@ sub _get_table_definition {
         #  So convert all key names into uppercase.
         my $ref_uc = { map { uc($_) => $ref->{$_} } keys %$ref };
 
-        my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name. " . Dumper($ref_uc);
+        my $column_name = $ref_uc->{COLUMN_NAME} || confess "Failed to retrieve column name.";
         $res->{$column_name} = $ref_uc;
     } 
 

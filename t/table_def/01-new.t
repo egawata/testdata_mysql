@@ -7,7 +7,6 @@ use Test::More;
 use Test::Exception;
 use DBI;
 use Test::mysqld;
-use Data::Dumper;
 
 use Test::HandyData::mysql::TableDef;
 

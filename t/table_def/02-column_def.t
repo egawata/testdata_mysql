@@ -5,7 +5,6 @@ use Test::HandyData::mysql::TableDef;
 
 use Test::More tests => 4;
 use Test::mysqld;
-use Data::Dumper;
 
 
 main();
