@@ -5,6 +5,7 @@ use warnings;
 
 use 5.008;
 our $VERSION = '0.0.1';
+$VERSION = eval $VERSION;
 
 
 #  precision and scale of float value.
@@ -824,14 +825,11 @@ sub _val_year {
 }
 
 
-=cut _get_current_distinct_values($table, $col)
-
-Returns some distinct values in the specified $table and specified $col.
-
-
-
-=cut
-
+#
+#  _get_current_distinct_values($table, $col)
+#
+#  Returns some distinct values in the specified $table and specified $col.
+#
 sub _get_current_distinct_values {
     my ($self, $table, $col) = @_;
 
@@ -863,14 +861,12 @@ sub _get_current_distinct_values {
 }
 
 
-=cut _set_user_valspec($table_name, $valspec)
-
-Specifies user-defined rules for determining values of columns.
-
-Previous rules will be cleared.
-
-=cut
-
+#
+#  _set_user_valspec($table_name, $valspec)
+#
+#  Specifies user-defined rules for determining values of columns.
+#  Previous rules will be cleared.
+#
 sub _set_user_valspec {
     my ($self, $table, $table_valspec) = @_;
 
@@ -881,14 +877,12 @@ sub _set_user_valspec {
 }
 
 
-=cut _add_user_valspec($table, $table_valspec)
-
-Specifies user-defined rules for determining values of columns.
-
-Previous rules will remain and new rules will be added.
-
-=cut
-
+#
+#  _add_user_valspec($table, $table_valspec)
+#
+#  Specifies user-defined rules for determining values of columns.
+#  Previous rules will remain and new rules will be added.
+#
 sub _add_user_valspec {
     my ($self, $table, $table_valspec) = @_;
 
@@ -1008,12 +1002,11 @@ sub _check_fk_check_status {
 }
 
 
-=cut _add_record_if_not_exist($table, $col, $value)
-
-Inserts a record only if record(s) which value of column $col is $value doesn't exist.
-
-=cut
-
+#
+#  _add_record_if_not_exist($table, $col, $value)
+#
+#  Inserts a record only if record(s) which value of column $col is $value doesn't exist.
+#
 sub _add_record_if_not_exist {
     my ($self, $table, $col, $value) = @_;
 
@@ -1047,7 +1040,7 @@ There are still many limitations with this module. I'll fix them later.
 
 =head3 Only primary key with single column supported.
 
-It works even when trying to insert a record into a table which primary key consists of multiple columns. However, C<< insert >> won't return a value of primary key just inserted.
+Although it works when inserting a record into a table which primary key consists of multiple columns, C<< insert() >> won't return a value of primary key just inserted.
 
 
 =head3 Foreign key constraint which has multiple columns is not supported.
@@ -1060,9 +1053,9 @@ For now, if you want to use this module with such a table, specify those values 
 For now, if you want to use this module with such a table, specify those values explicitly.
 
 
-=head3 Some types are not supported.
+=head3 Some data types are not supported.
 
-For example, blob or set aren't supported. The values of those columns won't be auto-generated.
+For example, C<< blob >> or C<< set >> aren't supported. The values of those columns won't be auto-generated.
 
 
 Please report problems to Egawata C<< (egawa.takashi at gmail com) >>
@@ -1070,12 +1063,12 @@ Patches are welcome.
 
 =head1 AUTHOR
 
-Egawata C<< <egawa.takashi at gmail com> >>
+Takashi Egawa (C<< egawa.takashi at gmail com >>)
 
 
 =head1 LICENCE AND COPYRIGHT
 
-Copyright (c)2012-2013 Egawata C<< <egawa.takashi at gmail com> >>. All rights reserved.
+Copyright (c)2012-2013 Takashi Egawa (C<< egawa.takashi at gmail com >>). All rights reserved.
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself. See L<perlartistic>.

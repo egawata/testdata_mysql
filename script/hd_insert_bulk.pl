@@ -1,3 +1,5 @@
+#!perl
+
 use strict;
 use warnings;
 
@@ -15,7 +17,7 @@ exit(0);
 
 =head1 NAME
 
-hd_insert_bulk.pl - Inserts bulk data into mysql, using Test::HandyData.
+hd_insert_bulk.pl - Inserts records into mysql tables, using Test::HandyData.
 
 
 =head1 VERSION
@@ -27,15 +29,17 @@ This documentation refers to hd_insert_bulk.pl 0.0.1
 sub main {
     my $infile;
     my $debug = 0;
+    my $noutf8 = 0;
     my ($dbname, $host, $port, $user, $password);
     GetOptions(
-        'i|in=s'        => \$infile,
+        'i|in|infile=s' => \$infile,
         'd|dbname=s'    => \$dbname,
         'h|host=s'      => \$host,
         'port=i'        => \$port,
         'u|user=s'      => \$user,
         'p|password=s'  => \$password,
         'debug'         => \$debug,
+        'noutf8'        => \$noutf8,
     );
    
     $infile or usage();
@@ -48,10 +52,9 @@ sub main {
     $host and $dsn .= ";host=$host";
     $port and $dsn .= ";port=$port";
 
-    my $dbh = DBI->connect($dsn, $user, $password, { RaiseError => 1 })
+    my $dbh = DBI->connect($dsn, $user, $password, { RaiseError => 1, AutoCommit => 0 })
         or die $DBI::errstr;
-    $dbh->do("SET NAMES UTF8");
-    $dbh->do("begin");
+    $dbh->do("SET NAMES UTF8") unless $noutf8;
 
     my $hd = Test::HandyData::mysql->new( dbh => $dbh, fk => 1, debug => $debug );
 
@@ -62,7 +65,7 @@ sub main {
 
             my $list = $req->{$table};
             
-            #  データリストが配列だった場合(IDの指定がない場合)は、便宜的にIDを付与する。
+            #  When arrayref is passed instead of hashref, give IDs to each elements.
             if ( ref $list eq 'ARRAY' ) {
                 $list = {};
                 my $no = 1;
@@ -79,11 +82,11 @@ sub main {
         }
     };
     if ($@) {
-        $dbh->do('rollback');
+        $dbh->rollback;
         die "Failed to insert : $@";
     }
     else {
-        $dbh->do('commit');
+        $dbh->commit;
     }
 
     print YAML::Dump($hd->inserted);
@@ -125,7 +128,17 @@ sub insert {
 
 
 sub usage {
-    print "Usage: $0 -i (json input file)\n";
+    print <<USAGE;
+Options:
+    -i(--in,--infile) : input file (JSON)
+    -d(--dbname)      : database name
+    -h(--host)        : host
+    --port            : port no
+    -u(--user)        : username
+    -p(--password)    : password
+
+USAGE
+
     exit(-1);
 }
 
@@ -138,7 +151,7 @@ __END__
 
 =head1 USAGE
 
-    $ hd_insert_bulk.pl --infile mysample.json --dbname mydb -u myuser -p mypasswd
+    $ hd_insert_bulk.pl --infile mysample.json -d mydb -u myuser -p mypasswd
 
 
 =head1 ARGUMENTS
@@ -174,13 +187,13 @@ I<< (Required) >> Password to connect mysql
  
 =head1 DESCRIPTION
  
-This application inserts a collection of data into tables. You don't need to specify values to every required fields. You only need to specify values what you're really interested in. If you don't want to consider foreign key constraints, nor the order of insertion (usually you would insert a referenced record at first), it's ok. This application automatically add required fields and records in the right order.
+This application inserts a collection of data into tables. You don't need to specify values to every required fields. You only need to specify values what you're really interested in. If you don't want to consider foreign key constraints, nor the order of insertion (usually you would insert a referenced record at first), it's ok. This application automatically determines values for required fields in the right order.
+
 
 =head2 HOW TO PREPARE INPUT FILE
 
-This application accepts three file formats, I<json>, I<csv> and I<tsv>.
 
-    [Table definitions]
+    [Sample table definitions]
 
     create table item (
         id integer primary key auto_increment,
@@ -189,7 +202,7 @@ This application accepts three file formats, I<json>, I<csv> and I<tsv>.
 
     create table customer (
         id integer primary key auto_increment,
-        name varchar(50)
+        name varchar(50) not null
     );
         
     create table purchase (
@@ -204,17 +217,19 @@ This application accepts three file formats, I<json>, I<csv> and I<tsv>.
 
 =head3 json
 
+Currently this application accepts JSON format.
+
 FORMAT:
 
     {
         (table name) : {
-            (id): { (column name): (value), ... },
+            (ID): { (column name): (value), ... },
             ...
         },
         ....
     }
 
-FOR EXAMPLE:
+EXAMPLE: Save the following as C<exapmle.json>
 
     {
         "item" : {
@@ -231,9 +246,14 @@ FOR EXAMPLE:
             "3": { "customer_id" : "##customer.2", "item_id" : "##item.2" }
         }
     }
+    
+    * If a value references foreign key, its format is "##(table name).(ID)".
+
 
 This will make
-    
+
+    $ hd_insert_bulk.pl --infile example.json -d testdb -u myuser -p mypasswd
+
     [item] (Assuming next auto_increment value is 101)
         +-----+--------+
         | id  | name   |
@@ -249,17 +269,18 @@ This will make
         |  50 | name_50 |
         |  51 | name_51 |
         +-----+---------+
+        * No values in table 'customer' has been specified, so required values in the table will be determined automatically. 
     
     [purchase] (Assuming next auto_increment value is 501)
         +-----+-------------+---------+
         | id  | customer_id | item_id |
         |-----+-------------+---------+
         | 501 |          50 |     101 |
-        | 502 |          51 |     101 |
-        | 503 |          51 |     102 |
+        | 502 |          51 |     102 |
+        | 503 |          51 |     101 |
         +-----+-------------+---------+
 
-NOTE: ID may be omitted if it starts with 1 and is incremented by 1. 
+NOTE: ID may be omitted if it starts with 1 and is incremented one by one. 
 
         "purchase" : {
             "1": { "customer_id" : "##customer.1", "item_id" : "##item.1" },
@@ -275,23 +296,55 @@ is equivalent to:
             { "customer_id" : "##customer.2", "item_id" : "##item.2" }
         ]
 
-This is especially useful when those records aren't referenced from any other tables and you don't need to care about its ID.
+This is especially useful when those records won't be referenced from any other tables and you don't need to care about its ID.
+
+=head1 OUTPUT
+
+It will output all table names and IDs to STDOUT with YAML format like the followings:
+
+    ---
+    customer:
+      - 50
+      - 51
+    item:
+      - 101
+      - 102
+    purchase:
+      - 501
+      - 502
+      - 503
 
 
-=head3 csv
+You can use those values to delete test data. If you redirect the output to a file, you may later pass it to hd_delete_all.pl (included in this package) as an argument to delete those records.
 
-=head3 tsv
+    $ hd_delete_all inserted.yml
+    (This will delete all records above)
 
 
+=head1 TODO
+
+=over 4
+
+=item * To handle also YAML, CSV and TSV formats.
+
+
+=back
  
 =head1 BUGS AND LIMITATIONS
 
 Please report problems to Takashi Egawa (C<< egawa.takashi at gmail com >>)
 Patches are welcome.
 
+
+=head1 SEE ALSO
+
+L<Test::HandyData::mysql>
+L<hd_delete_all.pl>
+
+
 =head1 AUTHOR
 
-Takashi Egawa  (C<< egawa.takashi at gmail com >>)
+Takashi Egawa (C<< egawa.takashi at gmail com >>)
 
 
 =head1 LICENCE AND COPYRIGHT
